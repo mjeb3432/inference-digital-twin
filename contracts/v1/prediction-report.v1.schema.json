@@ -1,0 +1,315 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://inference-digital-twin.local/contracts/v1/prediction-report.v1.schema.json",
+  "title": "PredictionReportV1",
+  "description": "Persisted report contract returned by run APIs and report views.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract",
+    "report_id",
+    "run_id",
+    "status",
+    "scenario_hash",
+    "created_at",
+    "metrics",
+    "module_results",
+    "provenance"
+  ],
+  "properties": {
+    "contract": {
+      "const": "PredictionReport.v1"
+    },
+    "report_id": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9._:-]{3,128}$"
+    },
+    "run_id": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9._:-]{3,128}$"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "success",
+        "partial",
+        "failed"
+      ]
+    },
+    "scenario_hash": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ttft_ms",
+        "tpot_ms",
+        "tps",
+        "concurrency",
+        "cost_usd_per_hour",
+        "power_watts"
+      ],
+      "properties": {
+        "ttft_ms": {
+          "$ref": "#/$defs/metric_estimate"
+        },
+        "tpot_ms": {
+          "$ref": "#/$defs/metric_estimate"
+        },
+        "tps": {
+          "$ref": "#/$defs/metric_estimate"
+        },
+        "concurrency": {
+          "$ref": "#/$defs/metric_estimate"
+        },
+        "mfu_utilization_pct": {
+          "$ref": "#/$defs/metric_estimate"
+        },
+        "gpu_utilization_pct": {
+          "$ref": "#/$defs/metric_estimate"
+        },
+        "carbon_kg_per_hour": {
+          "$ref": "#/$defs/metric_estimate"
+        },
+        "renewable_share_pct": {
+          "$ref": "#/$defs/metric_estimate"
+        },
+        "cost_usd_per_hour": {
+          "$ref": "#/$defs/metric_estimate"
+        },
+        "power_watts": {
+          "$ref": "#/$defs/metric_estimate"
+        }
+      }
+    },
+    "module_results": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "module_name",
+          "module_version",
+          "status",
+          "artifact_ids",
+          "latency_ms"
+        ],
+        "properties": {
+          "module_name": {
+            "type": "string",
+            "enum": [
+              "hardware",
+              "interconnect",
+              "runtime",
+              "orchestration",
+              "energy"
+            ]
+          },
+          "module_version": {
+            "type": "string",
+            "pattern": "^v[0-9]+(\\.[0-9]+){0,2}$"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "success",
+              "partial",
+              "failed"
+            ]
+          },
+          "artifact_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 256
+            },
+            "minItems": 1,
+            "uniqueItems": true
+          },
+          "latency_ms": {
+            "type": "number",
+            "minimum": 0
+          },
+          "error": {
+            "$ref": "#/$defs/error_payload"
+          }
+        }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scenario_hash",
+        "artifact_ids",
+        "module_versions",
+        "timestamp",
+        "commit_id"
+      ],
+      "properties": {
+        "scenario_hash": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "artifact_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "module_versions": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "hardware",
+            "runtime",
+            "orchestration"
+          ],
+          "properties": {
+            "hardware": {
+              "type": "string",
+              "pattern": "^v[0-9]+(\\.[0-9]+){0,2}$"
+            },
+            "interconnect": {
+              "type": "string",
+              "pattern": "^v[0-9]+(\\.[0-9]+){0,2}$"
+            },
+            "runtime": {
+              "type": "string",
+              "pattern": "^v[0-9]+(\\.[0-9]+){0,2}$"
+            },
+            "orchestration": {
+              "type": "string",
+              "pattern": "^v[0-9]+(\\.[0-9]+){0,2}$"
+            },
+            "energy": {
+              "type": "string",
+              "pattern": "^v[0-9]+(\\.[0-9]+){0,2}$"
+            }
+          }
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "commit_id": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{7,40}$"
+        },
+        "assumptions_registry_version": {
+          "type": "string",
+          "pattern": "^v[0-9]+(\\.[0-9]+){0,2}$"
+        }
+      }
+    },
+    "errors": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/error_payload"
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 1000
+      },
+      "maxItems": 100
+    },
+    "cache": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cache_key",
+        "cache_hit"
+      ],
+      "properties": {
+        "cache_key": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "cache_hit": {
+          "type": "boolean"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "metric_estimate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "value",
+        "unit"
+      ],
+      "properties": {
+        "value": {
+          "type": "number"
+        },
+        "unit": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "confidence_interval": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "lower",
+            "upper"
+          ],
+          "properties": {
+            "lower": {
+              "type": "number"
+            },
+            "upper": {
+              "type": "number"
+            }
+          }
+        }
+      }
+    },
+    "error_payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "error_class",
+        "message"
+      ],
+      "properties": {
+        "error_class": {
+          "type": "string",
+          "enum": [
+            "validation",
+            "data_missing",
+            "calibration_out_of_range",
+            "compute_timeout",
+            "internal"
+          ]
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 5000
+        },
+        "details": {
+          "type": "object"
+        }
+      }
+    }
+  }
+}

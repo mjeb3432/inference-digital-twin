@@ -1,0 +1,43 @@
+﻿{
+  "artifact_id": "coefficients-core-2026-03",
+  "artifact_version": "v1",
+  "assumptions_registry_version": "v1",
+  "module_versions": {
+    "hardware": "v1.1.0",
+    "interconnect": "v1.1.0",
+    "runtime": "v1.1.0",
+    "orchestration": "v1.1.0",
+    "energy": "v1.1.0"
+  },
+  "coefficients": {
+    "hardware": {
+      "base_ttft_ms": 720,
+      "base_tpot_ms": 140,
+      "throughput_scale": 1.0,
+      "concurrency_scale": 1.9,
+      "precision_factors": {
+        "fp16": 1.0,
+        "bf16": 1.03,
+        "fp8": 1.15,
+        "int8": 1.2
+      }
+    },
+    "interconnect": {
+      "latency_scale": 1.0,
+      "throughput_scale": 1.0
+    },
+    "runtime": {
+      "throughput_scale": 1.06,
+      "concurrency_scale": 1.08
+    },
+    "orchestration": {
+      "throughput_scale": 1.0,
+      "concurrency_scale": 1.0,
+      "latency_scale": 1.0
+    },
+    "energy": {
+      "platform_overhead_watts": 220,
+      "infrastructure_usd_per_hour_per_gpu": 0.32
+    }
+  }
+}

@@ -1,0 +1,13 @@
+﻿{% extends "base.html" %}
+
+{% block content %}
+<section class="workspace-grid">
+  <section class="panel metrics">
+    <h1>Runs</h1>
+    <p class="muted">Most recent first. Open a run to inspect timeline, metrics, and provenance.</p>
+    <div id="runsTable"></div>
+  </section>
+</section>
+<script src="/static/runs_list.js?v=20260328" defer></script>
+{% endblock %}
+

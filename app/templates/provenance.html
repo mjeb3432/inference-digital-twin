@@ -1,0 +1,27 @@
+﻿{% extends "base.html" %}
+
+{% block content %}
+<section class="workspace-grid">
+  <section class="panel metrics">
+    <h1>Report Provenance</h1>
+    <p class="mono">Report ID: <span id="reportId">{{ report_id }}</span></p>
+
+    <dl id="provenanceKv" class="kv"></dl>
+
+    <h2>Known Limitations</h2>
+    <ul id="limitations"></ul>
+
+    <div class="actions-row">
+      <button id="bundleButton" class="accent">Export Reproducibility Bundle</button>
+      <a id="runBackLink" class="ghost-link" href="#">Open Run</a>
+    </div>
+
+    <pre id="bundlePreview" class="bundle-preview"></pre>
+  </section>
+</section>
+<script>
+  window.__REPORT_ID__ = "{{ report_id }}";
+</script>
+<script src="/static/provenance.js?v=20260328" defer></script>
+{% endblock %}
+

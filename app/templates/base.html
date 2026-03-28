@@ -1,0 +1,31 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{ title }} · Inference Digital Twin</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Roboto+Mono:wght@400;500&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/app.css?v=20260332" />
+</head>
+<body class="{{ body_class or '' }}">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+  <header class="topbar" role="banner">
+    <div class="brand">Inference Digital Twin</div>
+    <nav aria-label="Main" class="topnav">
+      <a class="nav-link {% if active_nav == 'explorer' %}active{% endif %}" href="/explorer">Explorer</a>
+      <a class="nav-link {% if active_nav == 'runs' %}active{% endif %}" href="/runs">Runs</a>
+      <a class="nav-link {% if active_nav == 'artifacts' %}active{% endif %}" href="/artifacts">Artifacts</a>
+    </nav>
+    <button id="themeToggle" class="theme-toggle" type="button" aria-label="Toggle theme" aria-pressed="false">Theme</button>
+  </header>
+
+  <main id="main-content" class="page-shell {{ page_shell_class or '' }}" role="main">
+    {% block content %}{% endblock %}
+  </main>
+  <script src="/static/common.js?v=20260332" defer></script>
+</body>
+</html>
+

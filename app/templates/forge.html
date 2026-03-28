@@ -1,0 +1,101 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{ title }}</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
+  <link rel="stylesheet" href="/static/forge.css?v=20260328f" />
+  <script src="/static/forge.js?v=20260328f" defer></script>
+</head>
+<body class="forge-page">
+  <div class="desktop-banner" role="status">BEST VIEWED ON DESKTOP (1024PX+)</div>
+  <div class="forge-backdrop" aria-hidden="true"></div>
+
+  <div id="forgeRoot" class="forge-root">
+    <aside class="forge-left" aria-label="Decision rail">
+      <header class="left-header">
+        <p class="kicker">AI DATA CENTER CONSTRUCTION SIMULATOR</p>
+        <h1>THE FORGE</h1>
+        <p class="live-line"><span class="led live"></span>UNDER CONSTRUCTION</p>
+      </header>
+
+      <section class="left-panel">
+        <h2>BUILD TIMELINE</h2>
+        <ol id="phaseTimeline" class="phase-timeline"></ol>
+      </section>
+
+      <section class="left-panel decision-panel">
+        <h2 id="leftPhaseTitle">PHASE 1: SITE SELECTION &amp; PERMITTING</h2>
+        <div id="leftDecisionBody" class="decision-body"></div>
+        <button id="confirmPhaseButton" class="confirm-button" type="button">CONFIRM</button>
+      </section>
+
+      <section class="left-panel metrics-panel">
+        <h2>FACILITY METRICS</h2>
+        <div class="metric-row"><span>TOTAL CAPEX</span><strong id="capexTicker">$0</strong></div>
+        <div class="metric-row"><span>ANNUAL OPEX</span><strong id="annualOpex">$0</strong></div>
+        <div class="metric-row"><span>TARGET PUE</span><strong id="targetPue">2.00</strong></div>
+        <div class="metric-row"><span>UPTIME PROJECTION</span><strong id="uptimeProjection">0.000%</strong></div>
+      </section>
+
+      <section class="left-panel terminal-panel">
+        <h2>BUILD TERMINAL</h2>
+        <div id="buildLog" class="build-log" aria-live="polite"></div>
+      </section>
+    </aside>
+
+    <main class="forge-center" aria-label="Living construction canvas">
+      <header class="canvas-header">
+        <div>
+          <p class="kicker">CENTER CANVAS</p>
+          <h2 id="canvasTitle">LIVE CONSTRUCTION VIEW</h2>
+        </div>
+        <div class="canvas-actions">
+          <span id="siteStatusTag" class="status-tag"><span class="led live"></span>SITE ACQUIRED</span>
+          <button id="viewToggleButton" class="view-toggle" type="button" hidden>[⊕ MAP VIEW]</button>
+          <button id="fullScreenToggleButton" class="view-toggle" type="button" hidden>[FULL SCREEN]</button>
+        </div>
+      </header>
+
+      <section id="constructionCanvas" class="construction-canvas" aria-live="polite"></section>
+
+      <section id="benchmarkSuite" class="benchmark-suite">
+        <header class="benchmark-header">
+          <h3>INFERENCE BENCHMARK SUITE</h3>
+          <button id="benchmarkToggle" class="ghost-button" type="button" aria-expanded="true">COLLAPSE</button>
+        </header>
+        <div id="benchmarkBody" class="benchmark-body"></div>
+      </section>
+    </main>
+
+    <aside class="forge-right" aria-label="Inspector rail">
+      <section class="right-panel deploy-panel">
+        <h2>DEPLOYMENT</h2>
+        <p id="deployStatus" class="deploy-status">READY</p>
+        <div class="deploy-track"><span id="deployProgress" class="deploy-fill"></span></div>
+      </section>
+
+      <section class="right-panel">
+        <h2 id="inspectorTitle">INSPECTOR</h2>
+        <p id="inspectorSubtitle" class="muted">HOVER OR SELECT AN ELEMENT TO VIEW COSTS, TIMELINES, AND TRADEOFFS.</p>
+      </section>
+
+      <section class="right-panel">
+        <h2>DETAILS</h2>
+        <dl id="inspectorDetails" class="inspector-details"></dl>
+      </section>
+
+      <section class="right-panel">
+        <h2>COST / SPECS</h2>
+        <div id="inspectorMetrics" class="inspector-metrics"></div>
+      </section>
+
+      <section class="right-panel">
+        <h2>VISUAL CONTEXT</h2>
+        <div id="inspectorViz" class="inspector-viz"></div>
+      </section>
+    </aside>
+  </div>
+</body>
+</html>
