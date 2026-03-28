@@ -1,0 +1,23 @@
+﻿{% extends "base.html" %}
+
+{% block content %}
+<section class="workspace-grid run-grid">
+  <section class="panel metrics">
+    <h1>Run Timeline</h1>
+    <p class="mono">Run ID: <span id="runId">{{ run_id }}</span></p>
+    <ol id="stageList" class="timeline"></ol>
+    <p id="runStatus" class="status-line" aria-live="polite"></p>
+  </section>
+
+  <section class="panel metrics">
+    <h2>Result Metrics</h2>
+    <div id="runMetricCards" class="metric-grid"></div>
+    <p id="provenanceLink" class="status-line"></p>
+  </section>
+</section>
+<script>
+  window.__RUN_ID__ = "{{ run_id }}";
+</script>
+<script src="/static/run_detail.js?v=20260328" defer></script>
+{% endblock %}
+

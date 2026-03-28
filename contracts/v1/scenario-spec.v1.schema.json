@@ -1,0 +1,350 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://inference-digital-twin.local/contracts/v1/scenario-spec.v1.schema.json",
+  "title": "ScenarioSpecV1",
+  "description": "Canonical scenario contract for inference digital twin runs.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract",
+    "scenario_id",
+    "created_at",
+    "workload",
+    "hardware",
+    "interconnect",
+    "runtime",
+    "orchestration",
+    "calibration"
+  ],
+  "properties": {
+    "contract": {
+      "const": "ScenarioSpec.v1"
+    },
+    "scenario_id": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9._:-]{3,128}$"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 5000
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64
+      },
+      "uniqueItems": true,
+      "maxItems": 32
+    },
+    "assumptions_registry_version": {
+      "type": "string",
+      "pattern": "^v[0-9]+(\\.[0-9]+){0,2}$"
+    },
+    "workload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "model_family",
+        "workload_type",
+        "prompt_tokens",
+        "completion_tokens",
+        "target_slo"
+      ],
+      "properties": {
+        "model_family": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "workload_type": {
+          "type": "string",
+          "enum": [
+            "chat",
+            "code",
+            "summarization",
+            "multimodal"
+          ]
+        },
+        "prompt_tokens": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "completion_tokens": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "target_slo": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "p95_ttft_ms_max",
+            "p95_tpot_ms_max"
+          ],
+          "properties": {
+            "p95_ttft_ms_max": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "p95_tpot_ms_max": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            }
+          }
+        },
+        "traffic_profile": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "steady_qps",
+            "burst_qps"
+          ],
+          "properties": {
+            "steady_qps": {
+              "type": "number",
+              "minimum": 0
+            },
+            "burst_qps": {
+              "type": "number",
+              "minimum": 0
+            }
+          }
+        }
+      }
+    },
+    "hardware": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "gpu_sku",
+        "gpu_count",
+        "node_count",
+        "host_cpu_class",
+        "memory_gb_per_gpu"
+      ],
+      "properties": {
+        "gpu_sku": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "gpu_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "node_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "host_cpu_class": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "memory_gb_per_gpu": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      }
+    },
+    "interconnect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "intra_node_fabric",
+        "inter_node_fabric",
+        "topology_profile"
+      ],
+      "properties": {
+        "intra_node_fabric": {
+          "type": "string",
+          "enum": [
+            "pcie",
+            "nvlink"
+          ]
+        },
+        "inter_node_fabric": {
+          "type": "string",
+          "enum": [
+            "ethernet",
+            "infiniband"
+          ]
+        },
+        "topology_profile": {
+          "type": "string",
+          "enum": [
+            "single_node",
+            "leaf_spine",
+            "fat_tree"
+          ]
+        }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "serving_stack",
+        "precision",
+        "tensor_parallelism",
+        "pipeline_parallelism",
+        "batching_strategy"
+      ],
+      "properties": {
+        "serving_stack": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "precision": {
+          "type": "string",
+          "enum": [
+            "fp16",
+            "bf16",
+            "fp8",
+            "int8"
+          ]
+        },
+        "tensor_parallelism": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "pipeline_parallelism": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "batching_strategy": {
+          "type": "string",
+          "enum": [
+            "static",
+            "dynamic"
+          ]
+        },
+        "cuda_graphs_enabled": {
+          "type": "boolean"
+        },
+        "kernel_launch_mode": {
+          "type": "string",
+          "enum": [
+            "balanced",
+            "fused",
+            "aggressive"
+          ]
+        }
+      }
+    },
+    "orchestration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scheduler",
+        "autoscaling_policy",
+        "placement_strategy",
+        "failure_policy"
+      ],
+      "properties": {
+        "scheduler": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "autoscaling_policy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "placement_strategy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "failure_policy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "region": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "power_price_usd_per_kwh": {
+          "type": "number",
+          "minimum": 0
+        },
+        "pue": {
+          "type": "number",
+          "minimum": 1
+        }
+      }
+    },
+    "energy_system": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "primary_source"
+      ],
+      "properties": {
+        "primary_source": {
+          "type": "string",
+          "enum": [
+            "grid",
+            "natural_gas",
+            "solar",
+            "wind",
+            "hydro",
+            "battery_hybrid"
+          ]
+        },
+        "renewable_share_pct": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "onsite_generation_mw": {
+          "type": "number",
+          "minimum": 0
+        },
+        "storage_mwh": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "calibration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_id",
+        "artifact_version"
+      ],
+      "properties": {
+        "artifact_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "artifact_version": {
+          "type": "string",
+          "pattern": "^v[0-9]+(\\.[0-9]+){0,2}$"
+        }
+      }
+    }
+  }
+}

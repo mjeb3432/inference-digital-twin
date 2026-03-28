@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://inference-digital-twin.local/contracts/v1/error-taxonomy.v1.json",
+  "title": "CanonicalErrorTaxonomyV1",
+  "description": "Canonical error classes locked by engineering review.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract",
+    "error_classes"
+  ],
+  "properties": {
+    "contract": {
+      "const": "ErrorTaxonomy.v1"
+    },
+    "error_classes": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": [
+          "validation",
+          "data_missing",
+          "calibration_out_of_range",
+          "compute_timeout",
+          "internal"
+        ]
+      },
+      "minItems": 5,
+      "maxItems": 5
+    }
+  }
+}

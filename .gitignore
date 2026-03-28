@@ -1,0 +1,14 @@
+﻿__pycache__/
+*.py[cod]
+*.db
+*.sqlite3
+.venv/
+.pytest_cache/
+.mypy_cache/
+coverage.xml
+htmlcov/
+*.egg-info/
+.gstack/
+artifacts/design-review/
+artifacts/qa/
+inference_digital_twin.db
