@@ -5,18 +5,24 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>{{ title }}</title>
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
-  <link rel="stylesheet" href="/static/forge.css?v=20260328f" />
-  <script src="/static/forge.js?v=20260328f" defer></script>
+  <link rel="stylesheet" href="/static/forge.css?v=20260328m" />
+  <script src="/static/forge.js?v=20260328m" defer></script>
 </head>
 <body class="forge-page">
   <div class="desktop-banner" role="status">BEST VIEWED ON DESKTOP (1024PX+)</div>
   <div class="forge-backdrop" aria-hidden="true"></div>
 
   <div id="forgeRoot" class="forge-root">
-    <aside class="forge-left" aria-label="Decision rail">
+    <aside id="forgeLeftRail" class="forge-left" aria-label="Decision rail">
       <header class="left-header">
         <p class="kicker">AI DATA CENTER CONSTRUCTION SIMULATOR</p>
-        <h1>THE FORGE</h1>
+        <div class="left-header-main">
+          <h1>THE FORGE</h1>
+          <div class="rail-width-controls" aria-label="Left rail width controls">
+            <button id="leftRailNarrowButton" class="ghost-button rail-size-btn" type="button" aria-label="Narrow left panel">−</button>
+            <button id="leftRailWideButton" class="ghost-button rail-size-btn" type="button" aria-label="Widen left panel">+</button>
+          </div>
+        </div>
         <p class="live-line"><span class="led live"></span>UNDER CONSTRUCTION</p>
       </header>
 
@@ -41,6 +47,12 @@
 
       <section class="left-panel terminal-panel">
         <h2>BUILD TERMINAL</h2>
+        <div class="terminal-actions">
+          <button id="exportScenarioButton" class="ghost-button" type="button">EXPORT SCENARIO JSON</button>
+          <button id="importScenarioButton" class="ghost-button" type="button">IMPORT SCENARIO JSON</button>
+          <button id="exportEventLogButton" class="ghost-button" type="button">EXPORT EVENT LOG</button>
+          <input id="importScenarioInput" type="file" accept=".json,application/json" hidden />
+        </div>
         <div id="buildLog" class="build-log" aria-live="polite"></div>
       </section>
     </aside>
@@ -97,5 +109,6 @@
       </section>
     </aside>
   </div>
+  <div id="helpPopoverLayer" class="help-popover-layer" hidden></div>
 </body>
 </html>
