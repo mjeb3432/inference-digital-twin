@@ -1,61 +1,104 @@
 # Inference Digital Twin
 
-A desktop application for simulating AI data center infrastructure decisions — from site selection and power through cooling, compute, networking, and DCIM — with live inference benchmarks in an interactive world-map view.
+**Simulate before you spend.** The Inference Digital Twin lets infrastructure teams model an AI data center end-to-end — site, power, cooling, compute, networking, and operations — then run inference benchmarks against it before a single rack ships.
 
 Built by [Watt-Bit Research](https://github.com/mjeb3432).
 
-## Getting Started
+---
 
-**Requirements:** Python 3.11 or higher. [Download Python](https://www.python.org/downloads/)
+## What It Does
 
-### Install & Run
+The core of the application is **The Forge**, an interactive 8-phase simulator where you make real infrastructure decisions and see their performance, cost, and carbon impact in real time:
+
+1. **Site & Workload** — pick a city from the world map, choose your inference workload profile
+2. **Power** — select energy source, PUE target, renewable mix
+3. **Cooling** — air, liquid, immersion — each with different efficiency curves
+4. **Compute** — GPU SKU (A100 → B200), count per node, node count
+5. **Networking** — topology (leaf-spine / fat-tree), fabric (Ethernet / InfiniBand), intra-node (NVLink)
+6. **Runtime** — tensor/pipeline parallelism, batching strategy, precision, CUDA graphs
+7. **Orchestration** — placement strategy, autoscaling policy, traffic profile
+8. **Results** — live benchmarks: TTFT, TPS, Concurrency, MFU, GPU utilization, power draw, cost/hour, carbon/hour
+
+Every prediction is versioned, content-hashed, and traceable through a full provenance chain.
+
+## Who It's For
+
+- ML infrastructure engineers evaluating deployment choices
+- Platform / SRE teams sizing clusters before procurement
+- FinOps teams forecasting cost and carbon at scale
+- Anyone who wants to understand how hardware, network, and runtime decisions interact
+
+---
+
+## Installation
+
+**Requirements:** [Python 3.11+](https://www.python.org/downloads/) and [Git](https://git-scm.com/downloads).
+
+### 1. Clone and install
 
 ```bash
 git clone https://github.com/mjeb3432/inference-digital-twin.git
 cd inference-digital-twin
 pip install -e ".[desktop]"
+```
+
+### 2. Launch
+
+```bash
 python -m desktop.desktop_main
 ```
 
-That's it. The app handles everything else — a local server starts in the background automatically and The Forge opens in a native window.
+The app opens with a cinematic Watt-Bit intro sequence, starts a local server in the background, and loads The Forge in a native desktop window. Nothing else to configure.
 
-> **Already installed?** Just run `python -m desktop.desktop_main` from the project directory.
+### Windows one-click
 
-### One-Click Launch (Windows)
+After the first install, double-click **`launch.bat`** in the project folder to start the app instantly.
 
-Double-click `launch.bat` in the project root. It activates the virtual environment and starts the app.
-
-### Build a Standalone .exe
+### Build a portable .exe
 
 ```bash
 pyinstaller desktop_main.spec
 ```
 
-The output is `dist/InferenceDigitalTwin.exe` — a single file you can share with anyone. No Python install required on their machine.
+Produces `dist/InferenceDigitalTwin.exe` — a single file that runs on any Windows machine without Python installed.
 
-## What's Inside
+---
 
-**The Forge** is the main experience — an 8-phase interactive simulator where you design an AI data center from scratch and benchmark its inference performance (TTFT, TPS, Concurrency, MFU) in real time.
+## How the Simulation Works
 
-The app also includes:
-
-- **Explorer** — browse and filter prediction reports across scenarios
-- **Runs & Artifacts** — async simulation pipeline with content-addressed caching
-- **Provenance** — full audit trail for every prediction (inputs, hashes, coefficients)
-
-## Tech Stack
-
-Python 3.11+ / FastAPI / SQLite / PyQt6 / Vanilla JS / PyInstaller
-
-## Project Layout
+The prediction engine is a five-stage module pipeline. Each stage takes the scenario inputs and the upstream stage's output, applies physics-informed coefficients, and passes metrics forward:
 
 ```
-desktop/              Desktop app (entry point, screens, assets)
-app/                  FastAPI backend (API, modules, templates, static)
-contracts/v1/         Versioned JSON Schema contracts
-artifacts/            Deterministic coefficient files
-docs/                 Architecture plans, deep dives, knowledge base
-tests/                Contract, module, integration, and frontend tests
+Hardware → Interconnect → Runtime → Orchestration → Energy
+```
+
+| Module | Predicts |
+|--------|----------|
+| **Hardware** | Base TTFT, TPOT, TPS, and concurrency from GPU SKU, count, and precision |
+| **Interconnect** | Latency and throughput impact of topology, fabric, and NVLink |
+| **Runtime** | Parallelism gains, batching efficiency, MFU from TP/PP/precision/kernels |
+| **Orchestration** | Placement efficiency, autoscaling impact, saturation-adjusted throughput |
+| **Energy** | Total power draw, cost per hour, carbon emissions from energy mix and PUE |
+
+All coefficients are stored in `artifacts/coefficients.v1.json` and versioned alongside the code. Reports include SHA-256 content hashes for reproducibility.
+
+---
+
+## Project Structure
+
+```
+desktop/           Desktop application (PyQt6 + QWebEngineView)
+  screens/         Opening animation, logo reveal, main browser window
+  assets/          Sprite sheets, backgrounds, Watt-Bit icons
+app/               FastAPI backend
+  modules/         Simulation pipeline (hardware, interconnect, runtime, orchestration, energy)
+  api/             REST API endpoints
+  templates/       Jinja2 HTML (Forge, Explorer, Runs, Artifacts, Provenance)
+  static/          CSS, JS, geographic data
+contracts/v1/      Versioned JSON Schema contracts
+artifacts/         Deterministic coefficient files
+docs/              Architecture plan, test plan, knowledge base
+tests/             31 tests (contracts, modules, integration, frontend regressions)
 ```
 
 ## Running Tests
@@ -65,12 +108,6 @@ pip install -e ".[dev]"
 pytest
 ```
 
-## Documentation
+## License
 
-| Document | What it covers |
-|----------|---------------|
-| `docs/PLAN.md` | Architecture and design plan |
-| `docs/TEST_PLAN.md` | Test strategy |
-| `docs/notion_workspace/` | Deep dives, formulas, risk register |
-| `DESIGN.md` | Design system (typography, colors, spacing) |
-| `CHANGELOG.md` | Version history |
+See repository for license details.
