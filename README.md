@@ -21,13 +21,6 @@ The core of the application is **The Forge**, an interactive 8-phase simulator w
 
 Every prediction is versioned, content-hashed, and traceable through a full provenance chain.
 
-## Who It's For
-
-- ML infrastructure engineers evaluating deployment choices
-- Platform / SRE teams sizing clusters before procurement
-- FinOps teams forecasting cost and carbon at scale
-- Anyone who wants to understand how hardware, network, and runtime decisions interact
-
 ---
 
 ## Installation
