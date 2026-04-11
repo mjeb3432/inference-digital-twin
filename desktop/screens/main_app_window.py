@@ -16,7 +16,7 @@ class MainAppWindow(QMainWindow):
         self._port = port
 
         self.setWindowTitle("Inference Digital Twin - The Forge")
-        self.setWindowIcon(QIcon(resource_path("desktop/assets/appicon.png")))
+        self.setWindowIcon(QIcon(resource_path("desktop/assets/wattbit_icon.png")))
         self.resize(1600, 900)
         self.setStyleSheet(f"background-color: {NAVY};")
 

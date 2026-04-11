@@ -50,7 +50,7 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName("Inference Digital Twin")
     app.setQuitOnLastWindowClosed(False)
-    app.setWindowIcon(QIcon(resource_path("desktop/assets/appicon.ico")))
+    app.setWindowIcon(QIcon(resource_path("desktop/assets/wattbit_icon.ico")))
 
     manager = AppManager()
 

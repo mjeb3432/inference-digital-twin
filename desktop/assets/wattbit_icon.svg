@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Chip body - dark navy with gradient -->
+  <defs>
+    <linearGradient id="chipGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#2a1a4e"/>
+      <stop offset="50%" stop-color="#1a1035"/>
+      <stop offset="100%" stop-color="#2a1a4e"/>
+    </linearGradient>
+    <linearGradient id="boltGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#f5c842"/>
+      <stop offset="100%" stop-color="#e8941a"/>
+    </linearGradient>
+    <linearGradient id="innerGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ff6b9d"/>
+      <stop offset="30%" stop-color="#e8941a"/>
+      <stop offset="70%" stop-color="#f5a623"/>
+      <stop offset="100%" stop-color="#ff6b9d"/>
+    </linearGradient>
+  </defs>
+  <!-- Chip pins - top -->
+  <rect x="18" y="2" width="4" height="6" rx="1" fill="#94A3B8"/>
+  <rect x="26" y="2" width="4" height="6" rx="1" fill="#94A3B8"/>
+  <rect x="34" y="2" width="4" height="6" rx="1" fill="#94A3B8"/>
+  <rect x="42" y="2" width="4" height="6" rx="1" fill="#94A3B8"/>
+  <!-- Chip pins - bottom -->
+  <rect x="18" y="56" width="4" height="6" rx="1" fill="#94A3B8"/>
+  <rect x="26" y="56" width="4" height="6" rx="1" fill="#94A3B8"/>
+  <rect x="34" y="56" width="4" height="6" rx="1" fill="#94A3B8"/>
+  <rect x="42" y="56" width="4" height="6" rx="1" fill="#94A3B8"/>
+  <!-- Chip pins - left -->
+  <rect x="2" y="18" width="6" height="4" rx="1" fill="#94A3B8"/>
+  <rect x="2" y="26" width="6" height="4" rx="1" fill="#94A3B8"/>
+  <rect x="2" y="34" width="6" height="4" rx="1" fill="#94A3B8"/>
+  <rect x="2" y="42" width="6" height="4" rx="1" fill="#94A3B8"/>
+  <!-- Chip pins - right -->
+  <rect x="56" y="18" width="6" height="4" rx="1" fill="#94A3B8"/>
+  <rect x="56" y="26" width="6" height="4" rx="1" fill="#94A3B8"/>
+  <rect x="56" y="34" width="6" height="4" rx="1" fill="#94A3B8"/>
+  <rect x="56" y="42" width="6" height="4" rx="1" fill="#94A3B8"/>
+  <!-- Chip body -->
+  <rect x="8" y="8" width="48" height="48" rx="4" fill="url(#chipGrad)" stroke="#3a2a5e" stroke-width="1.5"/>
+  <!-- Inner glow square -->
+  <rect x="14" y="14" width="36" height="36" rx="2" fill="url(#innerGrad)" opacity="0.15"/>
+  <!-- Lightning bolt -->
+  <polygon points="36,14 24,34 30,34 28,50 40,28 34,28" fill="url(#boltGrad)" stroke="#f5c842" stroke-width="0.5" stroke-linejoin="round"/>
+</svg>

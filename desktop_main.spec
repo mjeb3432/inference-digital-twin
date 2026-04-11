@@ -73,5 +73,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='desktop/assets/appicon.ico',
+    icon='desktop/assets/wattbit_icon.ico',
 )
