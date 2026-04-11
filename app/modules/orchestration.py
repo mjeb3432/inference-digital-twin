@@ -22,9 +22,11 @@ def run(input_payload: dict, coefficients: dict, upstream: dict[str, dict]) -> M
     placement_gain = PLACEMENT_GAIN.get(placement, 1.0)
 
     burst_qps = workload.get("traffic_profile", {}).get("burst_qps", workload.get("prompt_tokens", 128) / 16)
-    saturation = min(1.8, max(0.7, burst_qps / max(1.0, upstream_concurrency)))
+    saturation = min(2.0, max(0.1, burst_qps / max(1.0, upstream_concurrency)))
 
-    tps = upstream_tps * placement_gain * coefficients["throughput_scale"] / saturation
+    # High saturation = system loaded = throughput near capacity.
+    # Low saturation = system idle = throughput proportionally lower.
+    tps = upstream_tps * placement_gain * coefficients["throughput_scale"] * min(1.0, saturation)
     concurrency = upstream_concurrency * placement_gain * coefficients["concurrency_scale"]
     ttft = upstream_ttft * saturation * coefficients["latency_scale"]
 

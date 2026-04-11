@@ -11,7 +11,7 @@ class ModuleResult:
 
 
 def metric(value: float, unit: str, spread: float = 0.08) -> dict[str, float | str | dict[str, float]]:
-    lower = value * (1 - spread)
+    lower = max(0.0, value * (1 - spread))
     upper = value * (1 + spread)
     return {
         "value": round(value, 4),

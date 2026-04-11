@@ -24,12 +24,12 @@ def run(input_payload: dict, coefficients: dict) -> ModuleResult:
     perf_factor = GPU_PERF_FACTOR.get(gpu_sku, 0.9)
     precision_factor = coefficients["precision_factors"].get(runtime["precision"], 1.0)
 
-    base_ttft = coefficients["base_ttft_ms"] * (prompt_tokens / 512)
-    base_tpot = coefficients["base_tpot_ms"] * (completion_tokens / 256)
+    base_ttft = coefficients["base_ttft_ms"] * max(0.1, prompt_tokens / 512.0)
+    base_tpot = coefficients["base_tpot_ms"] * max(0.1, completion_tokens / 256.0)
 
     ttft = max(12.0, base_ttft / (perf_factor * precision_factor))
     tpot = max(4.0, base_tpot / (perf_factor * precision_factor))
-    tps = max(5.0, (1000 / tpot) * gpu_count * coefficients["throughput_scale"])
+    tps = max(5.0, (1000.0 / tpot) * gpu_count * coefficients["throughput_scale"])
     concurrency = max(1.0, gpu_count * perf_factor * coefficients["concurrency_scale"])
 
     return ModuleResult(

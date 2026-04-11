@@ -36,9 +36,9 @@ def run(input_payload: dict, coefficients: dict, upstream: dict[str, dict]) -> M
     kernel_bonus = {"balanced": 0.0, "fused": 5.0, "aggressive": 8.0}.get(kernel_mode, 0.0)
     graphs_bonus = 4.0 if cuda_graphs_enabled else 0.0
     mfu_utilization = min(
-        98.5,
+        95.0,
         max(
-            26.0,
+            15.0,
             42.0
             + (parallel_gain * 9.0)
             + (batching_gain * 14.0)

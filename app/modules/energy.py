@@ -45,7 +45,7 @@ def run(input_payload: dict, coefficients: dict, upstream: dict[str, dict]) -> M
     renewable_share = float(energy_system.get("renewable_share_pct", 18.0))
     renewable_share = min(100.0, max(0.0, renewable_share))
     carbon_factor = CARBON_INTENSITY_KG_PER_KWH.get(primary_source, CARBON_INTENSITY_KG_PER_KWH["grid"])
-    effective_carbon_factor = max(0.01, carbon_factor * (1 - renewable_share / 135.0))
+    effective_carbon_factor = max(0.01, carbon_factor * (1 - renewable_share / 100.0))
     carbon_kg_per_hour = (power_watts / 1000) * effective_carbon_factor
 
     return ModuleResult(

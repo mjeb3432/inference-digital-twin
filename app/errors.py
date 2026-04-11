@@ -13,7 +13,7 @@ ERROR_CLASSES = {
 }
 
 
-@dataclass(slots=True)
+@dataclass
 class AppError(Exception):
     error_class: str
     message: str

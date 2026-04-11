@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from app.modules.common import ModuleResult, metric
 
@@ -9,9 +9,14 @@ TOPOLOGY_PENALTY = {
     "fat_tree": 1.08,
 }
 
-FABRIC_PENALTY = {
+# Latency penalty: higher = worse.  Throughput factor: higher = better.
+FABRIC_LATENCY = {
     "ethernet": 1.18,
     "infiniband": 1.03,
+}
+FABRIC_THROUGHPUT = {
+    "ethernet": 0.85,
+    "infiniband": 1.15,
 }
 
 
@@ -23,11 +28,14 @@ def run(input_payload: dict, coefficients: dict, upstream: dict[str, dict]) -> M
     upstream_tps = upstream["tps"]["value"]
 
     topology_penalty = TOPOLOGY_PENALTY[interconnect["topology_profile"]]
-    fabric_penalty = FABRIC_PENALTY[interconnect["inter_node_fabric"]]
+    fabric = interconnect["inter_node_fabric"]
+    fabric_latency = FABRIC_LATENCY[fabric]
+    fabric_throughput = FABRIC_THROUGHPUT[fabric]
     intra_bonus = 0.94 if interconnect["intra_node_fabric"] == "nvlink" else 1.0
 
-    latency_multiplier = topology_penalty * fabric_penalty * intra_bonus
-    throughput_multiplier = max(0.65, 1 / latency_multiplier)
+    latency_multiplier = topology_penalty * fabric_latency * intra_bonus
+    # Throughput is driven by fabric bandwidth, not simply the inverse of latency
+    throughput_multiplier = max(0.65, fabric_throughput / topology_penalty)
 
     ttft = upstream_ttft * latency_multiplier * coefficients["latency_scale"]
     tpot = upstream_tpot * latency_multiplier * coefficients["latency_scale"]
