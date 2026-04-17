@@ -1,3 +1,5 @@
+import os
+
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QPixmap, QColor, QFont, QPainter, QKeyEvent
 from PyQt6.QtWidgets import (
@@ -9,8 +11,9 @@ from desktop.utils.resource import resource_path
 NAVY = QColor("#0a1628")
 CYAN = QColor("#5bc0de")
 
-DISPLAY_MS = 4000  # total time on screen
-FADE_IN_MS = 1000  # fade-in duration
+FAST_INTRO = os.getenv("IDT_FAST_INTRO", "1") != "0"
+DISPLAY_MS = 900 if FAST_INTRO else 4000
+FADE_IN_MS = 450 if FAST_INTRO else 1000
 FADE_STEPS = 40    # opacity steps during fade
 
 

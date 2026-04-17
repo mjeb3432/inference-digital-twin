@@ -1,3 +1,5 @@
+import os
+
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QRectF, QPointF
 from PyQt6.QtGui import (
     QPixmap, QColor, QPainter, QPen, QBrush, QRadialGradient,
@@ -27,7 +29,8 @@ CALGARY_REL_X = 0.28
 CALGARY_REL_Y = 0.30
 
 SCENE_W, SCENE_H = 1600, 900
-TOTAL_DURATION_MS = 10_000  # total animation length
+FAST_INTRO = os.getenv("IDT_FAST_INTRO", "1") != "0"
+TOTAL_DURATION_MS = 2_400 if FAST_INTRO else 10_000
 TICK_MS = 25  # ~40 fps
 
 

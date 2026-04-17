@@ -459,6 +459,7 @@
     worldPaths: null,
     openHelpKey: null,
     openHelpAnchorEl: null,
+    layoutCache: { signature: "", value: null },
     leftRailWidth: LEFT_RAIL_WIDTH.default,
     canvas: {
       zoom: SCALE_PRESETS.fit,
@@ -485,6 +486,7 @@
 
   const $ = (id) => document.getElementById(id);
   const el = {};
+  const EMPTY_NETWORK_ROWS = Object.freeze({ paths: "", leafs: "", spine: "", mda: "", hdas: "", taps: "", zones: "" });
 
   const CURRENCY0 = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
   const INTEGER = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
@@ -495,13 +497,44 @@
     cacheElements();
     bindEvents();
     hydrateLeftRailWidth();
-    loadWorldPaths();
     recalcAll();
     applyAutoBenchmarkCollapse();
-    renderAll();
+    renderBootShell();
+    scheduleInitialHydration();
     pushLog("SESSION STARTED — THE FORGE ONLINE", "muted");
     emitEvent("SESSION_STARTED", { phase: facilityState.phase, schemaVersion: facilityState.scenario.schemaVersion }, "INFO");
     startTickers();
+  }
+
+  function renderBootShell() {
+    renderTimeline();
+    renderLeftDecision();
+    renderLeftMetrics();
+    renderBuildLog();
+    renderInspector();
+    el.constructionCanvas.innerHTML = `
+      <div class="canvas-shell canvas-boot-shell">
+        <div class="canvas-boot-copy">
+          <span class="led live"></span>
+          <strong>INITIALIZING LIVE FACILITY VIEW...</strong>
+        </div>
+      </div>
+    `;
+    renderBenchmarks();
+  }
+
+  function scheduleInitialHydration() {
+    const hydrate = () => {
+      renderCenterCanvas();
+      loadWorldPaths();
+    };
+
+    if (typeof window.requestAnimationFrame === "function") {
+      window.requestAnimationFrame(hydrate);
+      return;
+    }
+
+    window.setTimeout(hydrate, 0);
   }
 
   async function loadWorldPaths() {
@@ -2696,20 +2729,48 @@
     setupTravelAnimations(mapMode ? VIEW_MODE.MAP : VIEW_MODE.FLOOR);
   }
 
-  function renderFloorView(withTransition) {
-    const phase = facilityState.phase;
+  function deriveFloorLayout(phase) {
+    const targetMw = ui.derived.targetMw || facilityState.power.targetMW || 10;
+    const rackKw = ui.derived.rackKw || 28;
+    const coolingType = facilityState.facility.coolingType;
+    const denseRackLayout = ["d2c", "immersion"].includes(coolingType) || (facilityState.compute.gpusPerRack || 8) > 8;
+    const signature = [
+      phase,
+      facilityState.site.acreage,
+      targetMw.toFixed(2),
+      (facilityState.facility.pue || 1.6).toFixed(3),
+      facilityState.compute.rackCount || 0,
+      rackKw.toFixed(2),
+      coolingType || "none",
+      facilityState.site.locationType || "unset",
+      denseRackLayout ? "dense" : "standard",
+    ].join("|");
+
+    if (ui.layoutCache.signature === signature && ui.layoutCache.value) {
+      return ui.layoutCache.value;
+    }
+
     const plan = computeFloorplan({
       acreage: facilityState.site.acreage,
-      targetMw: ui.derived.targetMw || facilityState.power.targetMW || 10,
+      targetMw,
       pue: facilityState.facility.pue || 1.6,
       rackCount: facilityState.compute.rackCount || 0,
-      kWPerRack: ui.derived.rackKw || 28,
-      coolingType: facilityState.facility.coolingType,
+      kWPerRack: rackKw,
+      coolingType,
       locationType: facilityState.site.locationType,
     });
-    const denseRackLayout = ["d2c", "immersion"].includes(facilityState.facility.coolingType) || (facilityState.compute.gpusPerRack || 8) > 8;
     const racks = buildRackRects(plan.rooms.dataHall, facilityState.compute.rackCount || 0, { dense: denseRackLayout });
-    const networkRows = phase >= 6 ? rackRowPaths(plan.rooms.dataHall, racks) : { paths: "", leafs: "", spine: "", mda: "" };
+    const networkRows = phase >= 6 ? rackRowPaths(plan.rooms.dataHall, racks) : EMPTY_NETWORK_ROWS;
+    const value = { plan, racks, networkRows };
+
+    ui.layoutCache.signature = signature;
+    ui.layoutCache.value = value;
+    return value;
+  }
+
+  function renderFloorView(withTransition) {
+    const phase = facilityState.phase;
+    const { plan, racks, networkRows } = deriveFloorLayout(phase);
     const zoom = ui.canvas.zoom;
     const stageClass = withTransition ? "floor-stage" : "";
 
@@ -3008,15 +3069,7 @@
   }
 
   function rackRowPaths(dataHall, rackLayout) {
-    if (!rackLayout.slots.length) return {
-      paths: "",
-      spine: "",
-      mda: "",
-      hdas: "",
-      taps: "",
-      zones: "",
-      leafs: "",
-    };
+    if (!rackLayout.slots.length) return EMPTY_NETWORK_ROWS;
 
     const mda = {
       x: dataHall.x + 14,
