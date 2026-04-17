@@ -30,7 +30,15 @@ class SchemaRegistry:
 
     def validate(self, key: str, payload: Any) -> None:
         validator = self._validators[key]
-        errors = sorted(validator.iter_errors(payload), key=lambda err: err.path)
+        # Sort by a tuple of stringified path components. jsonschema's err.path
+        # is a deque that can mix str and int (e.g. ["items", 0, "field"]),
+        # and comparing two deques element-wise raises TypeError when two errors
+        # differ in type at the same position. Coercing to str makes ordering
+        # deterministic and comparison-safe regardless of schema shape.
+        errors = sorted(
+            validator.iter_errors(payload),
+            key=lambda err: tuple(str(p) for p in err.path),
+        )
         if errors:
             first = errors[0]
             path = ".".join(str(p) for p in first.path)

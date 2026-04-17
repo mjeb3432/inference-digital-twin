@@ -174,8 +174,10 @@
           "additionalProperties": false,
           "required": [
             "hardware",
+            "interconnect",
             "runtime",
-            "orchestration"
+            "orchestration",
+            "energy"
           ],
           "properties": {
             "hardware": {
