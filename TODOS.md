@@ -26,6 +26,30 @@
 **Priority:** P1
 **Depends on:** Versioned contracts, artifact metadata schema, canonical error taxonomy
 
+### Auto-save (30s interval)
+
+**What:** Write `idt_session_v1` to localStorage on a 30-second interval, in addition to the existing mutation-debounce write.
+
+**Why:** The mutation debounce covers graceful usage but not crashes between mutations. A periodic write closes the gap without requiring persistent-state infrastructure.
+
+**Context:** localStorage restore accepted in #ui-startup-performance. Auto-save is the natural next step — ships after session restore is stable in production.
+
+**Effort:** S
+**Priority:** P2
+**Depends on:** localStorage session restore (#ui-startup-performance)
+
+### Behavioral Tests for Desktop Intro Screens
+
+**What:** Convert `tests/test_desktop_intro.py` from source-string assertions to behavioral PyQt6 tests using `QApplication` in `conftest.py` and `QTest.keyClick()` for skip-key coverage.
+
+**Why:** Source-string assertions don't catch regressions in behavior — only in file content. A rename or refactor could break the feature without breaking the tests.
+
+**Context:** Current assertions check that `earthspin-sheet-citylights.png` and `FastTransformation` appear in the file text. Behavioral tests require a QApplication instance and QTest event simulation.
+
+**Effort:** M
+**Priority:** P2
+**Depends on:** QApplication conftest.py setup (none currently)
+
 ### Reproducibility Bundle CLI
 
 **What:** Add a CLI to export and import reproducibility bundles (scenario, report, provenance, artifact references).
