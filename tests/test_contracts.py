@@ -75,6 +75,16 @@ def test_scenario_contract_validates() -> None:
     registry.validate("scenario", base_scenario())
 
 
+def test_artifact_coefficients_validates_against_schema() -> None:
+    import jsonschema
+
+    artifact_path = Path.cwd() / "artifacts" / "coefficients.v1.json"
+    schema_path = Path.cwd() / "contracts" / "v1" / "artifact-coefficients.v1.schema.json"
+    artifact = json.loads(artifact_path.read_text(encoding="utf-8-sig"))
+    schema = json.loads(schema_path.read_text(encoding="utf-8-sig"))
+    jsonschema.validate(artifact, schema)
+
+
 def test_error_taxonomy_is_locked() -> None:
     path = Path.cwd() / "contracts" / "v1" / "error-taxonomy.v1.json"
     payload = json.loads(path.read_text(encoding="utf-8-sig"))

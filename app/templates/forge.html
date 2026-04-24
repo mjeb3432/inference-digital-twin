@@ -66,7 +66,6 @@
       var overlay = document.getElementById('introOverlay');
       if (!overlay) return;
 
-      var AUTO_DISMISS_MS = 6500;
       var mountedAt = Date.now();
       var dismissed = false;
 
@@ -107,7 +106,6 @@
         dismiss();
       });
 
-      setTimeout(dismiss, AUTO_DISMISS_MS);
     })();
   </script>
 
@@ -226,4 +224,4 @@
   <div id="helpPopoverLayer" class="help-popover-layer" hidden></div>
 </body>
 </html>
-                                                                  
+
