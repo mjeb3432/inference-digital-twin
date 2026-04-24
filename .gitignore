@@ -18,6 +18,11 @@ htmlcov/
 build/
 dist/
 
+# Frontend (Vite build output + npm deps)
+app/static/dist/
+frontend/node_modules/
+frontend/.vite/
+
 # Tool caches
 .gstack/
 

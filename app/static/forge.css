@@ -410,17 +410,21 @@ body {
 
 .canvas-header {
   border-bottom: 1px solid var(--border);
-  padding: 12px;
+  padding: 14px 16px 12px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0)),
+    linear-gradient(90deg, rgba(0, 229, 255, 0.06), rgba(0, 0, 0, 0));
 }
 
 .canvas-header h2 {
-  margin: 3px 0 0;
-  font-size: 0.82rem;
+  margin: 4px 0 0;
+  font-size: 0.78rem;
   text-transform: uppercase;
+  letter-spacing: 0.14em;
 }
 
 .canvas-actions {
@@ -468,8 +472,8 @@ body {
     0deg,
     transparent,
     transparent 3px,
-    rgba(0, 0, 0, 0.08) 3px,
-    rgba(0, 0, 0, 0.08) 4px
+    rgba(0, 0, 0, 0.045) 3px,
+    rgba(0, 0, 0, 0.045) 4px
   );
 }
 
@@ -477,6 +481,72 @@ body {
   position: absolute;
   inset: 0;
   z-index: 1;
+}
+
+.canvas-phase-brief {
+  position: absolute;
+  left: 18px;
+  top: 58px;
+  z-index: 7;
+  width: min(430px, calc(100% - 36px));
+  border: 1px solid rgba(91, 192, 222, 0.3);
+  background: linear-gradient(180deg, rgba(7, 16, 28, 0.94), rgba(5, 11, 20, 0.9));
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(4px);
+  padding: 16px 18px;
+}
+
+.phase-brief-kicker {
+  margin: 0 0 8px;
+  color: var(--accent);
+  font-size: 0.56rem;
+  text-transform: uppercase;
+}
+
+.canvas-phase-brief h3 {
+  margin: 0 0 8px;
+  font-size: 0.92rem;
+  line-height: 1.35;
+  text-transform: uppercase;
+}
+
+.phase-brief-body,
+.phase-brief-next {
+  margin: 0;
+  color: #bfd4ea;
+  font-size: 0.58rem;
+  line-height: 1.7;
+}
+
+.phase-brief-next {
+  color: var(--accent);
+  margin-top: 10px;
+}
+
+.phase-brief-stats {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.phase-brief-stat {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.02);
+  padding: 8px;
+  display: grid;
+  gap: 5px;
+}
+
+.phase-brief-stat span {
+  color: var(--dim);
+  font-size: 0.5rem;
+  text-transform: uppercase;
+}
+
+.phase-brief-stat strong {
+  font-size: 0.6rem;
+  color: var(--text);
 }
 
 .canvas-boot-shell {
@@ -1751,6 +1821,43 @@ input[type="number"] {
   stroke-width: 1;
 }
 
+.cad-solar-pad {
+  fill: rgba(30, 103, 136, 0.35);
+  stroke: #5c90a8;
+  stroke-width: 1;
+}
+
+.cad-solar-frame {
+  stroke: #9fd4ff;
+  stroke-width: 0.8;
+}
+
+.cad-wind-ppa,
+.cad-wind-mast,
+.cad-wind-blade {
+  fill: none;
+  stroke: #9aaec1;
+  stroke-width: 1.1;
+}
+
+.cad-wind-hub {
+  fill: #cfe1ee;
+  stroke: #7c92a7;
+  stroke-width: 0.8;
+}
+
+.cad-reactor-shell {
+  fill: rgba(82, 94, 122, 0.28);
+  stroke: #99a8c4;
+  stroke-width: 1.1;
+}
+
+.cad-reactor-stack {
+  fill: #aab6cb;
+  stroke: #8793a7;
+  stroke-width: 0.8;
+}
+
 .cad-human {
   fill: none;
   stroke: #5b626a;
@@ -1875,6 +1982,14 @@ input[type="number"] {
 
   .forge-center {
     min-height: 860px;
+  }
+
+  .canvas-phase-brief {
+    position: relative;
+    left: auto;
+    top: auto;
+    margin: 14px 14px 0;
+    width: auto;
   }
 }
 

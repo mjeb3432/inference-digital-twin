@@ -176,3 +176,49 @@ def test_download_export_uses_delayed_cleanup_for_blob_url() -> None:
     assert "a.style.display = \"none\";" in body
     assert "window.setTimeout(() => {" in body
     assert "URL.revokeObjectURL(url);" in body
+
+
+def test_phase_two_power_panel_uses_firm_backing_language_not_queue_wording() -> None:
+    source = load_source()
+    body = between(source, "function decisionPhase2()", "function decisionPhase3()")
+
+    assert "POWER PROCUREMENT STACK" in body
+    assert "FIRM BACKING:" in body
+    assert "VARIABLE OVERLAY:" in body
+    assert "| LEAD:" in body
+    assert "| QUEUE:" not in body
+
+
+def test_power_validation_blocks_variable_mix_without_firm_backing() -> None:
+    source = load_source()
+    body = between(source, "function recalcAll()", "function enforceLocks()")
+
+    assert "const powerPortfolio = computePowerPortfolio(facilityState.power.sources);" in body
+    assert "powerPortfolio.variablePct > powerPortfolio.firmPct" in body
+    assert "VARIABLE POWER SHARE EXCEEDS FIRM BACKING." in body
+
+
+def test_floor_view_renders_phase_brief_overlay_before_phase8() -> None:
+    source = load_source()
+
+    assert "function renderPhaseBriefOverlay()" in source
+    body = between(source, "function renderFloorView(withTransition)", "function projectGeoPoint(lon, lat, view = MAP_VIEWBOX)")
+    assert "renderPhaseBriefOverlay()" in body
+
+
+def test_inspector_supports_power_source_explanations() -> None:
+    source = load_source()
+    body = between(source, "function inspectFor(kind, key)", "function latencyClass(latency)")
+
+    assert 'if (kind === "power-source")' in body
+    assert 'subtitle: "POWER SOURCE ROLE"' in body
+    assert '["24/7 STATE", power.firmingState]' in body
+
+
+def test_phase_four_decision_numbers_are_sequential() -> None:
+    source = load_source()
+    body = between(source, "function decisionPhase4()", "function decisionPhase5()")
+
+    assert "DECISION 1 — DEVELOPER TYPE" in body
+    assert "DECISION 2 — COOLING INFRASTRUCTURE" in body
+    assert "DECISION 3 — POWER ARCHITECTURE" in body

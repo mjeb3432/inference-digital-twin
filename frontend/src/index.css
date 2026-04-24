@@ -1,0 +1,102 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================
+   Design tokens — CSS variables so shadcn picks up the theme.
+   HSL triplets because shadcn styles expect `hsl(var(--name))`.
+   ============================================================ */
+@layer base {
+  :root {
+    --background:             224 12% 5%;    /* #08090B */
+    --foreground:             0 0% 98%;
+
+    --card:                   220 10% 8%;    /* #0E1116 */
+    --card-foreground:        0 0% 98%;
+
+    --popover:                220 10% 8%;
+    --popover-foreground:     0 0% 98%;
+
+    --primary:                36 91% 55%;    /* amber #F5A623 */
+    --primary-foreground:     224 12% 5%;
+
+    --secondary:              210 15% 14%;
+    --secondary-foreground:   0 0% 95%;
+
+    --muted:                  210 10% 16%;
+    --muted-foreground:       210 10% 65%;
+
+    --accent:                 173 80% 40%;   /* teal */
+    --accent-foreground:      0 0% 98%;
+
+    --destructive:            0 84% 60%;
+    --destructive-foreground: 0 0% 98%;
+
+    --border:                 210 12% 18%;   /* #1C2128 */
+    --input:                  210 12% 18%;
+    --ring:                   36 91% 55%;
+
+    --radius: 0.5rem;
+  }
+
+  html, body, #root {
+    height: 100%;
+  }
+
+  body {
+    background: #08090B;
+    color: #F5F7FA;
+  }
+
+  /* Smooth, disciplined scrollbars — no shiny Mac translucence */
+  ::-webkit-scrollbar         { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track   { background: #0E1116; }
+  ::-webkit-scrollbar-thumb   { background: #1C2128; border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: #2A323C; }
+}
+
+/* ============================================================
+   Animations borrowed from hero-futuristic reference
+   ============================================================ */
+@layer utilities {
+  .fade-in           { animation: fade-in 0.55s ease-out forwards; }
+  .fade-in-subtitle  { animation: fade-in-subtitle 0.9s ease-out forwards; }
+
+  /* "Scroll to explore" CTA from hero-futuristic demo */
+  .explore-btn {
+    position: absolute;
+    left: 50%;
+    bottom: 46px;
+    transform: translateX(-50%);
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 24px;
+    font-family: "Plus Jakarta Sans", sans-serif;
+    font-weight: 600;
+    font-size: 13px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: white;
+    background: rgba(245, 166, 35, 0.08);
+    border: 1px solid rgba(245, 166, 35, 0.6);
+    backdrop-filter: blur(6px);
+    cursor: pointer;
+    opacity: 0;
+    animation: fade-in 0.9s ease-out forwards;
+    transition: transform 160ms ease, background 160ms ease, border-color 160ms ease;
+    z-index: 61;
+  }
+  .explore-btn:hover {
+    background: rgba(245, 166, 35, 0.22);
+    border-color: rgba(245, 166, 35, 1);
+    transform: translateX(-50%) translateY(-1px);
+  }
+  .explore-arrow { display: inline-flex; }
+  .arrow-svg     { transform: translateY(1px); animation: arrow-drift 1.6s ease-in-out infinite; }
+
+  @keyframes arrow-drift {
+    0%, 100% { transform: translateY(1px); }
+    50%      { transform: translateY(4px); }
+  }
+}
