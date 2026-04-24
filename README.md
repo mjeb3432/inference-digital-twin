@@ -6,6 +6,36 @@ Built by [Watt-Bit Research](https://github.com/mjeb3432).
 
 ---
 
+## Quick Start
+
+**Requirements:** [Python 3.11+](https://www.python.org/downloads/) and [Git](https://git-scm.com/downloads).
+
+### Option A — Browser (recommended)
+
+```bash
+git clone https://github.com/mjeb3432/inference-digital-twin.git
+cd inference-digital-twin
+pip install -e .
+python run.py
+```
+
+Open **[http://localhost:8000/forge](http://localhost:8000/forge)** in your browser.
+
+### Option B — Desktop app (Windows, macOS, Linux)
+
+Runs The Forge in a native window with an opening intro sequence. Requires PyQt6.
+
+```bash
+pip install -e ".[desktop]"
+python -m desktop.desktop_main
+```
+
+### Option C — Windows one-click
+
+Double-click **`launch.bat`** in the project folder. It creates a virtual environment, installs everything, and launches the desktop app automatically. No terminal needed.
+
+---
+
 ## What It Does
 
 The core of the application is **The Forge**, an interactive 8-phase simulator where you make real infrastructure decisions and see their performance, cost, and carbon impact in real time:
@@ -20,40 +50,6 @@ The core of the application is **The Forge**, an interactive 8-phase simulator w
 8. **Results** — live benchmarks: TTFT, TPS, Concurrency, MFU, GPU utilization, power draw, cost/hour, carbon/hour
 
 Every prediction is versioned, content-hashed, and traceable through a full provenance chain.
-
----
-
-## Installation
-
-**Requirements:** [Python 3.11+](https://www.python.org/downloads/) and [Git](https://git-scm.com/downloads).
-
-### 1. Clone and install
-
-```bash
-git clone https://github.com/mjeb3432/inference-digital-twin.git
-cd inference-digital-twin
-pip install -e ".[desktop]"
-```
-
-### 2. Launch
-
-```bash
-python -m desktop.desktop_main
-```
-
-The app opens with a cinematic Watt-Bit intro sequence, starts a local server in the background, and loads The Forge in a native desktop window. Nothing else to configure.
-
-### Windows one-click
-
-After the first install, double-click **`launch.bat`** in the project folder to start the app instantly.
-
-### Build a portable .exe
-
-```bash
-pyinstaller desktop_main.spec
-```
-
-Produces `dist/InferenceDigitalTwin.exe` — a single file that runs on any Windows machine without Python installed.
 
 ---
 
@@ -80,19 +76,24 @@ All coefficients are stored in `artifacts/coefficients.v1.json` and versioned al
 ## Project Structure
 
 ```
-desktop/           Desktop application (PyQt6 + QWebEngineView)
-  screens/         Opening animation, logo reveal, main browser window
-  assets/          Sprite sheets, backgrounds, Watt-Bit icons
 app/               FastAPI backend
+  api/             REST API endpoints (/api/runs, /api/reports, /api/health)
   modules/         Simulation pipeline (hardware, interconnect, runtime, orchestration, energy)
-  api/             REST API endpoints
+  services.py      Lazy-init service layer — UI loads instantly, backend warms in background
   templates/       Jinja2 HTML (Forge, Explorer, Runs, Artifacts, Provenance)
-  static/          CSS, JS, geographic data
+  static/          CSS, JS, intro overlay (intro.css / intro.js), geographic data
 contracts/v1/      Versioned JSON Schema contracts
 artifacts/         Deterministic coefficient files
-docs/              Architecture plan, test plan, knowledge base
-tests/             31 tests (contracts, modules, integration, frontend regressions)
+desktop/           Native desktop wrapper (PyQt6 + QWebEngineView)
+  screens/         Opening animation, logo reveal, main browser window
+  assets/          Sprite sheets, Watt-Bit icons
+web/               Next.js web frontend (React + Tailwind, connects to FastAPI via CORS)
+tests/             34 tests (contracts, modules, integration, frontend regressions)
+run.py             Start the web server at http://localhost:8000
+launch.bat         Windows one-click launcher (auto-creates venv on first run)
 ```
+
+---
 
 ## Running Tests
 
@@ -100,6 +101,22 @@ tests/             31 tests (contracts, modules, integration, frontend regressio
 pip install -e ".[dev]"
 pytest
 ```
+
+---
+
+## Web Frontend (Next.js)
+
+A parallel Next.js client lives in `web/`. It connects to the FastAPI backend via CORS.
+
+```bash
+cd web
+npm install
+npm run dev
+```
+
+Open **[http://localhost:3000](http://localhost:3000)**. The FastAPI server must also be running (`python run.py` in the project root).
+
+---
 
 ## License
 
