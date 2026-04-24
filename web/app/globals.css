@@ -1,0 +1,108 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@400;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+
+:root {
+  /* Surfaces */
+  --bg-0: #08090B;
+  --bg-1: #0F1114;
+  --bg-2: #171A1F;
+
+  /* Borders */
+  --border: #23272D;
+  --border-strong: #3A3F47;
+
+  /* Text */
+  --text-0: #EDEDED;
+  --text-1: #A0A4AB;
+  --text-2: #5C626B;
+
+  /* Accent — phosphor amber (live data, selection) */
+  --accent: #F5A623;
+  --accent-dim: rgba(245, 166, 35, 0.15);
+  --accent-alt: #1FE0C9;   /* compute/signal — use sparingly */
+
+  /* Semantic */
+  --nominal: #4ADE80;
+  --warn: #FBBF24;
+  --crit: #F87171;
+  --info: #60A5FA;
+
+  /* Typography */
+  --font-display: 'IBM Plex Sans Condensed', 'Arial Narrow', sans-serif;
+  --font-ui: 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+  /* Spacing base: 8px */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+
+  /* Layout */
+  --top-strip-h: 36px;
+  --bottom-strip-h: 42px;
+  --inspector-w: 360px;
+  --timeline-w: 240px;
+  --timeline-w-collapsed: 48px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background: var(--bg-0);
+  color: var(--text-0);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Scrollbar — thin, dark */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: var(--bg-0); }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 2px; }
+
+/* Tabular numerics everywhere they appear in monospace */
+.font-mono, [class*="mono"] {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Display / hero text */
+.font-display {
+  font-family: var(--font-display);
+  letter-spacing: -0.02em;
+}
+
+@layer utilities {
+  .text-balance { text-wrap: balance; }
+
+  /* Accent glow — used only on live/selected elements */
+  .glow-accent {
+    box-shadow: 0 0 0 1px var(--accent), 0 0 12px rgba(245, 166, 35, 0.25);
+  }
+
+  /* Panel glass — floating HUD cards */
+  .panel {
+    background: var(--bg-1);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+  }
+
+  .panel-strong {
+    background: var(--bg-1);
+    border: 1px solid var(--border-strong);
+    border-radius: 6px;
+  }
+}
