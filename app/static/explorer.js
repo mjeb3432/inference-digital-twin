@@ -1286,12 +1286,180 @@ function renderAll() {
   renderPalette();
   renderStageRail();
   renderBuildStack();
+  renderIsoView();
   renderCableTrace();
   renderInspector();
   renderTelemetryPanel();
   renderAlertFeed();
   updateScenarioPreview();
   renderOpsLog();
+}
+
+const WORLD_CITIES = [
+  { name: "New York",   x: 298, y: 178 },
+  { name: "London",     x: 487, y: 137 },
+  { name: "Frankfurt",  x: 510, y: 131 },
+  { name: "Tokyo",      x: 944, y: 172 },
+  { name: "Singapore",  x: 855, y: 308 },
+  { name: "São Paulo",  x: 322, y: 392 },
+  { name: "Sydney",     x: 967, y: 430 },
+  { name: "Dubai",      x: 650, y: 228 },
+  { name: "Mumbai",     x: 718, y: 255 },
+  { name: "Seoul",      x: 936, y: 168 },
+];
+
+const DC_COORDS = { x: 245, y: 168 };
+
+function setupViewTabs() {
+  const tabs = document.querySelectorAll(".view-tab");
+  const views = {
+    floor: document.getElementById("buildStack"),
+    iso:   document.getElementById("isoView"),
+    world: document.getElementById("worldMapView"),
+  };
+
+  tabs.forEach((tab) => {
+    tab.addEventListener("click", () => {
+      const target = tab.getAttribute("data-view");
+      tabs.forEach((t) => {
+        t.classList.remove("active");
+        t.setAttribute("aria-selected", "false");
+      });
+      tab.classList.add("active");
+      tab.setAttribute("aria-selected", "true");
+
+      Object.entries(views).forEach(([key, el]) => {
+        if (!el) return;
+        el.hidden = key !== target;
+      });
+
+      if (target === "iso") {
+        renderIsoView();
+      }
+    });
+  });
+}
+
+function renderIsoView() {
+  const grid = document.getElementById("isoGrid");
+  if (!grid) return;
+
+  grid.innerHTML = RACK_LAYOUT.map((rack) => {
+    const health = rackSignal(rack);
+    const isSelected = rack.id === state.selectedRackId ? "iso-selected" : "";
+    const stageNames = rack.stages.map((s) => {
+      const blockId = state.selectedByStage[s];
+      return blockId ? BLOCK_INDEX[blockId].label : STAGE_FLOW[stageIndex(s)].title;
+    }).join(" / ") || "EMPTY";
+
+    return `
+      <div class="iso-rack-block ${health} ${isSelected}" data-rack-id="${rack.id}" title="${rack.label}: ${stageNames}">
+        <div class="iso-top"></div>
+        <div class="iso-front">
+          <span class="iso-led"></span>
+          <span class="iso-label">${rack.label}</span>
+        </div>
+        <div class="iso-side"></div>
+      </div>
+    `;
+  }).join("");
+
+  grid.querySelectorAll(".iso-rack-block").forEach((block) => {
+    block.addEventListener("click", () => {
+      const rackId = block.getAttribute("data-rack-id");
+      if (!rackId) return;
+      state.selectedRackId = rackId;
+      const rack = RACK_LAYOUT.find((r) => r.id === rackId);
+      state.selectedStageId = rack?.stages[0] || null;
+      renderAll();
+      pushOpsLog(`Selected ${rackId.toUpperCase()} from ISO view.`, "info");
+    });
+  });
+}
+
+let worldMapLoaded = false;
+
+async function initWorldMap() {
+  if (worldMapLoaded) return;
+  worldMapLoaded = true;
+
+  const landmassGroup = document.getElementById("worldLandmass");
+  const arcsGroup = document.getElementById("worldArcs");
+  const citiesGroup = document.getElementById("worldCities");
+  const dcGroup = document.getElementById("worldDc");
+  if (!landmassGroup || !arcsGroup || !citiesGroup || !dcGroup) return;
+
+  try {
+    const paths = await fetchJson("/static/world_paths.json");
+
+    const svgNS = "http://www.w3.org/2000/svg";
+
+    paths.forEach((d) => {
+      const path = document.createElementNS(svgNS, "path");
+      path.setAttribute("d", d);
+      landmassGroup.appendChild(path);
+    });
+
+    const dcX = DC_COORDS.x;
+    const dcY = DC_COORDS.y;
+
+    WORLD_CITIES.forEach((city, idx) => {
+      const delay = idx * 0.3;
+      const midX = (dcX + city.x) / 2;
+      const midY = Math.min(dcY, city.y) - 80 - (Math.abs(city.x - dcX) * 0.08);
+      const d = `M ${dcX},${dcY} Q ${midX},${midY} ${city.x},${city.y}`;
+
+      const arc = document.createElementNS(svgNS, "path");
+      arc.setAttribute("d", d);
+      arc.setAttribute("class", "world-arc");
+      arc.style.animationDelay = `${delay}s`;
+      arcsGroup.appendChild(arc);
+
+      const dot = document.createElementNS(svgNS, "circle");
+      dot.setAttribute("cx", String(city.x));
+      dot.setAttribute("cy", String(city.y));
+      dot.setAttribute("r", "3");
+      dot.setAttribute("class", "city-dot");
+      citiesGroup.appendChild(dot);
+
+      const label = document.createElementNS(svgNS, "text");
+      label.setAttribute("x", String(city.x + 5));
+      label.setAttribute("y", String(city.y - 4));
+      label.setAttribute("class", "city-label");
+      label.textContent = city.name;
+      citiesGroup.appendChild(label);
+    });
+
+    const dcRing = document.createElementNS(svgNS, "circle");
+    dcRing.setAttribute("cx", String(dcX));
+    dcRing.setAttribute("cy", String(dcY));
+    dcRing.setAttribute("r", "6");
+    dcRing.setAttribute("class", "dc-ring");
+    dcGroup.appendChild(dcRing);
+
+    const dcDot = document.createElementNS(svgNS, "circle");
+    dcDot.setAttribute("cx", String(dcX));
+    dcDot.setAttribute("cy", String(dcY));
+    dcDot.setAttribute("r", "5");
+    dcDot.setAttribute("class", "dc-dot");
+    dcGroup.appendChild(dcDot);
+
+    const dcLabel = document.createElementNS(svgNS, "text");
+    dcLabel.setAttribute("x", String(dcX + 8));
+    dcLabel.setAttribute("y", String(dcY - 8));
+    dcLabel.setAttribute("class", "dc-label");
+    dcLabel.textContent = "TOR-DC-01";
+    dcGroup.appendChild(dcLabel);
+
+    const arcCountEl = document.getElementById("worldArcCount");
+    const regionCountEl = document.getElementById("worldRegionCount");
+    if (arcCountEl) arcCountEl.textContent = String(WORLD_CITIES.length);
+    if (regionCountEl) regionCountEl.textContent = "6";
+
+    pushOpsLog(`World map loaded: ${WORLD_CITIES.length} active arcs from TOR-DC-01.`, "info");
+  } catch (err) {
+    pushOpsLog(`World map load failed: ${err.message}`, "warn");
+  }
 }
 
 async function loadPresets() {
@@ -1565,6 +1733,7 @@ function bindKeyboardShortcuts() {
 document.addEventListener("DOMContentLoaded", async () => {
   setupIntro();
   setupConsoleModal();
+  setupViewTabs();
   startNocClock();
   bindKeyboardShortcuts();
   bindSyncedInputs("nodeCount", "nodeCountValue");
@@ -1584,6 +1753,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("logoutGhostButton")?.addEventListener("click", () => {
     pushOpsLog("Logout control pressed (auth flow unchanged).", "warn");
   });
+
+  document.querySelector('[data-view="world"]')?.addEventListener("click", initWorldMap);
 
   await loadPresets();
   renderAll();

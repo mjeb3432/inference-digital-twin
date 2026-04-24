@@ -1,5 +1,12 @@
 ﻿{% extends "base.html" %}
 
+{% block head %}
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Condensed:wght@400;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/static/explorer.css?v=20260423" />
+{% endblock %}
+
 {% block content %}
 <section id="sandboxIntro" class="sandbox-intro" aria-label="NOC onboarding">
   <article class="intro-card">
@@ -91,11 +98,50 @@
         <p class="eyebrow">Main Canvas</p>
         <h2 class="panel-title">Data Center Floor</h2>
       </div>
-      <p class="floor-legend mono">BLUE: NETWORK | ORANGE: POWER | GREEN: HEALTHY | RED: CRITICAL</p>
+      <div class="view-tabs" role="tablist" aria-label="Floor view">
+        <button class="view-tab active" data-view="floor" role="tab" aria-selected="true" type="button">[RACK FLOOR]</button>
+        <button class="view-tab" data-view="iso" role="tab" aria-selected="false" type="button">[ISO VIEW]</button>
+        <button class="view-tab" data-view="world" role="tab" aria-selected="false" type="button">[WORLD MAP]</button>
+      </div>
     </div>
 
     <div id="stageRail" class="stage-rail" aria-label="Provisioning sequence"></div>
-    <div id="buildStack" class="rack-floor" aria-label="Rack grid"></div>
+
+    <div class="floor-views">
+      <!-- FLOOR view -->
+      <div id="buildStack" class="rack-floor" aria-label="Rack grid" role="tabpanel"></div>
+
+      <!-- ISO view (hidden until tab selected) -->
+      <div id="isoView" class="iso-view" hidden aria-label="Isometric rack view" role="tabpanel">
+        <p class="iso-facility-label">TOR-DC-01 / INFERENCE FABRIC — ISOMETRIC</p>
+        <div id="isoGrid" class="iso-grid"></div>
+      </div>
+
+      <!-- WORLD MAP view (hidden until tab selected) -->
+      <div id="worldMapView" class="world-map-view" hidden aria-label="Token flow world map" role="tabpanel">
+        <div class="world-map-header">
+          <h3>Global Token Flows · TOR-DC-01 → Endpoints</h3>
+          <div class="world-map-stats">
+            <div class="world-stat">
+              <span class="world-stat-label">Active Arcs</span>
+              <span class="world-stat-value" id="worldArcCount">0</span>
+            </div>
+            <div class="world-stat">
+              <span class="world-stat-label">Regions Served</span>
+              <span class="world-stat-value" id="worldRegionCount">0</span>
+            </div>
+          </div>
+        </div>
+        <div class="world-svg-wrap">
+          <svg id="worldSvg" class="world-svg" viewBox="0 0 1200 650" preserveAspectRatio="xMidYMid meet">
+            <g id="worldLandmass" class="world-landmass"></g>
+            <g id="worldArcs"></g>
+            <g id="worldCities"></g>
+            <g id="worldDc"></g>
+          </svg>
+        </div>
+      </div>
+    </div>
 
     <div class="cable-tray" aria-label="Cable tray">
       <svg id="cableSvg" viewBox="0 0 900 120" preserveAspectRatio="none" role="img" aria-label="Cable paths">

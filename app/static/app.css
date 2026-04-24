@@ -48,33 +48,28 @@ body[data-theme="dark"] {
   --shadow: 0 14px 32px rgba(0, 0, 0, 0.34);
 }
 
+/* Explorer page uses the Augur VC palette — tokens are redeclared in
+   explorer.css using forge.css-compatible names. This block exists only
+   so that app.css-level rules (body background, color) pick up correctly
+   before explorer.css loads. */
 body.explorer-page {
-  --bg: #08090B;
-  --bg-raised: #0F1114;
-  --surface: #0F1114;
-  --surface-alt: #171A1F;
-  --text-primary: #EDEDED;
-  --text-muted: #A0A4AB;
-  --border: #23272D;
-  --accent: #F5A623;
-  --accent-strong: #d48f17;
-  --secondary: #8B5CF6;
-  --success: #4ADE80;
-  --warning: #FBBF24;
-  --error: #F87171;
-  --info: #60A5FA;
-  --shadow: 0 16px 34px rgba(0, 0, 0, 0.5);
-  --font-ui: "IBM Plex Sans Condensed", "Inter", sans-serif;
-  --font-data: "JetBrains Mono", monospace;
-  --font-code: "JetBrains Mono", monospace;
-}
-
-body.explorer-page[data-theme="light"] {
-  --bg: #0d1320;
-  --bg-raised: #162336;
-  --surface: #162338;
-  --surface-alt: #1c2f48;
-  --text-primary: #e8f5ff;
+  --bg:           #08090B;
+  --surface:      #0F1114;
+  --surface2:     #171A1F;
+  --border:       #23272D;
+  --border-strong:#3A3F47;
+  --text:         #EDEDED;
+  --dim:          #A0A4AB;
+  --dim2:         #5C626B;
+  --accent:       #F5A623;
+  --accent-dim:   rgba(245, 166, 35, 0.12);
+  --healthy:      #4ADE80;
+  --warn:         #FBBF24;
+  --critical:     #F87171;
+  --info:         #60A5FA;
+  --violet:       #8B5CF6;
+  --font-display: "IBM Plex Sans Condensed", "Arial Narrow", sans-serif;
+  --font-mono:    "JetBrains Mono", "Fira Code", monospace;
 }
 
 * {
