@@ -137,60 +137,45 @@
 }
 
 /* ============================================================
-   HUD corner brackets — pure CSS, always visible
+   HUD corner brackets — on a flat unrotated layer
+   Using a dedicated div so ::before/::after don't land on
+   the perspective-transformed .intro-grid element.
    ============================================================ */
 
-.intro-bg::before,
-.intro-bg::after {
+.intro-hud-corners {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  animation: intro-fade-in 600ms ease-out 300ms forwards;
+}
+
+/* All four L-shaped corners via pseudo-elements + box-shadow trick */
+.intro-hud-corners::before,
+.intro-hud-corners::after {
   content: "";
   position: absolute;
   width: 28px;
   height: 28px;
-  opacity: 0;
-  animation: intro-fade-in 600ms ease-out 300ms forwards;
   pointer-events: none;
 }
 
-/* Top-left */
-.intro-bg::before {
+/* Top-left + bottom-right via ::before */
+.intro-hud-corners::before {
   top: 18px;
   left: 18px;
   border-top: 1px solid rgba(245, 166, 35, 0.65);
   border-left: 1px solid rgba(245, 166, 35, 0.65);
+  box-shadow: calc(100vw - 64px) calc(100vh - 64px) 0 0 rgba(245, 166, 35, 0.65);
 }
 
-/* Top-right */
-.intro-bg::after {
+/* Top-right + bottom-left via ::after */
+.intro-hud-corners::after {
   top: 18px;
   right: 18px;
   border-top: 1px solid rgba(245, 166, 35, 0.65);
   border-right: 1px solid rgba(245, 166, 35, 0.65);
-}
-
-/* Bottom brackets via the grid child pseudo-elements */
-.intro-grid::before,
-.intro-grid::after {
-  content: "";
-  position: absolute;
-  width: 28px;
-  height: 28px;
-  opacity: 0;
-  animation: intro-fade-in 600ms ease-out 300ms forwards;
-  pointer-events: none;
-}
-
-.intro-grid::before {
-  bottom: 18px;
-  left: 18px;
-  border-bottom: 1px solid rgba(245, 166, 35, 0.65);
-  border-left: 1px solid rgba(245, 166, 35, 0.65);
-}
-
-.intro-grid::after {
-  bottom: 18px;
-  right: 18px;
-  border-bottom: 1px solid rgba(245, 166, 35, 0.65);
-  border-right: 1px solid rgba(245, 166, 35, 0.65);
+  box-shadow: calc(-100vw + 64px) calc(100vh - 64px) 0 0 rgba(245, 166, 35, 0.65);
 }
 
 /* ============================================================

@@ -1,7 +1,6 @@
 from PyQt6.QtCore import QObject, QTimer, Qt
 
 from desktop.server_thread import ServerThread
-from desktop.screens.space_title_screen import SpaceTitleScreen
 from desktop.screens.wbr_title_screen import WBRTitleScreen
 from desktop.screens.main_app_window import MainAppWindow
 
@@ -15,7 +14,6 @@ class AppManager(QObject):
 
         # Components (assigned externally by desktop_main)
         self.server_thread: ServerThread | None = None
-        self.space_screen: SpaceTitleScreen | None = None
         self.wbr_screen: WBRTitleScreen | None = None
         self.main_window: MainAppWindow | None = None
 
@@ -50,10 +48,6 @@ class AppManager(QObject):
         if self.main_window:
             self.main_window.close()
             self.main_window = None
-
-        if self.space_screen:
-            self.space_screen.close()
-            self.space_screen = None
 
         if self.wbr_screen:
             self.wbr_screen.close()

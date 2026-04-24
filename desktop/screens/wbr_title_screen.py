@@ -144,7 +144,7 @@ class WBRTitleScreen(QWidget):
         hero.addWidget(text_wrap, 1)
         root.addLayout(hero)
 
-        self._footer = QLabel("WATT-BIT  //  SIMPLY SILICON")
+        self._footer = QLabel("WATT-BIT INTELLIGENCE")
         self._footer.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._footer.setStyleSheet(
             "color:rgba(217,236,255,0.42);"
