@@ -1,14 +1,128 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>{{ title }}</title>
   <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
-  <link rel="stylesheet" href="/static/forge.css?v=20260417a" />
-  <script src="/static/forge.js?v=20260417a" defer></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=IBM+Plex+Mono:wght@400;500&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/intro.css?v=20260423c" />
+  <link rel="stylesheet" href="/static/forge.css?v=20260417b" />
 </head>
 <body class="forge-page">
+
+  <!-- ============================================================
+       OPENING INTRO — hero sequence.
+       Dismiss handlers are wired by a non-module inline script
+       BEFORE any ES modules load, so the overlay is always
+       dismissable regardless of whether WebGL/WebGPU init.
+       ============================================================ -->
+  <div id="introOverlay" class="intro-overlay" role="dialog" aria-label="The Forge — intro">
+    <!-- Pure-CSS animated backdrop that always works -->
+    <div class="intro-bg" aria-hidden="true">
+      <div class="intro-grid"></div>
+      <div class="intro-glow intro-glow-amber"></div>
+      <div class="intro-glow intro-glow-cyan"></div>
+      <div class="intro-scan-css"></div>
+      <div class="intro-vignette"></div>
+    </div>
+
+    <!-- Canvas for JS enhancement (used if three.js loads successfully) -->
+    <canvas class="intro-canvas" aria-hidden="true"></canvas>
+
+    <div class="intro-text">
+      <p class="intro-kicker">INFERENCE INFRASTRUCTURE DIGITAL TWIN &middot; SIMPLY SILICON</p>
+      <h1 class="intro-title">
+        <span class="word">THE</span>
+        <span class="word">FORGE</span>
+      </h1>
+      <p class="intro-subtitle">
+        A live digital twin for AI data centers &mdash; power, cooling, compute, and tokens, end to end.
+      </p>
+    </div>
+
+    <div class="intro-meta" aria-hidden="true">
+      <span>&#9670; INGEST // CDHI-01</span>
+      <span>SCANNING FACILITY GEOMETRY</span>
+      <span>CALGARY, AB</span>
+    </div>
+
+    <button class="intro-skip" type="button" aria-label="Skip intro">[ SKIP ]</button>
+
+    <button class="intro-enter" type="button" aria-label="Enter the facility">
+      ENTER THE HALL
+      <span class="intro-enter-arrow" aria-hidden="true">&rsaquo;</span>
+    </button>
+  </div>
+
+  <!-- ============================================================
+       BULLETPROOF DISMISS — runs immediately, no module, no deps.
+       If anything else fails, the user can still get out.
+       ============================================================ -->
+  <script>
+    (function () {
+      var overlay = document.getElementById('introOverlay');
+      if (!overlay) return;
+
+      var AUTO_DISMISS_MS = 6500;
+      var mountedAt = Date.now();
+      var dismissed = false;
+
+      function dismiss() {
+        if (dismissed) return;
+        dismissed = true;
+        overlay.dataset.state = 'exiting';
+        setTimeout(function () {
+          overlay.dataset.state = 'gone';
+          try {
+            document.dispatchEvent(new CustomEvent('forge:intro-complete'));
+          } catch (_) {
+            var ev = document.createEvent('Event');
+            ev.initEvent('forge:intro-complete', true, true);
+            document.dispatchEvent(ev);
+          }
+        }, 900);
+      }
+
+      window.__forgeDismissIntro = dismiss;
+      window.__forgeIntroMountedAt = mountedAt;
+
+      var skip  = overlay.querySelector('.intro-skip');
+      var enter = overlay.querySelector('.intro-enter');
+      if (skip)  skip.addEventListener('click', function (e) { e.stopPropagation(); dismiss(); });
+      if (enter) enter.addEventListener('click', function (e) { e.stopPropagation(); dismiss(); });
+
+      window.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' || e.key === 'Escape' || e.key === ' ' || e.key === 'Spacebar') {
+          dismiss();
+        }
+      });
+
+      // Click anywhere on the overlay background dismisses too.
+      overlay.addEventListener('click', function (e) {
+        var tag = (e.target && e.target.tagName) || '';
+        if (tag === 'BUTTON') return;
+        dismiss();
+      });
+
+      setTimeout(dismiss, AUTO_DISMISS_MS);
+    })();
+  </script>
+
+  <!-- three.js (WebGL build) for the optional enhanced effect -->
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+      }
+    }
+  </script>
+
+  <script type="module" src="/static/intro.js?v=20260423c"></script>
+  <script src="/static/forge.js?v=20260417b" defer></script>
+
   <div class="desktop-banner" role="status">BEST VIEWED ON DESKTOP (1024PX+)</div>
   <div class="forge-backdrop" aria-hidden="true"></div>
 
@@ -19,7 +133,7 @@
         <div class="left-header-main">
           <h1>THE FORGE</h1>
           <div class="rail-width-controls" aria-label="Left rail width controls">
-            <button id="leftRailNarrowButton" class="ghost-button rail-size-btn" type="button" aria-label="Narrow left panel">−</button>
+            <button id="leftRailNarrowButton" class="ghost-button rail-size-btn" type="button" aria-label="Narrow left panel">&minus;</button>
             <button id="leftRailWideButton" class="ghost-button rail-size-btn" type="button" aria-label="Widen left panel">+</button>
           </div>
         </div>
@@ -65,7 +179,7 @@
         </div>
         <div class="canvas-actions">
           <span id="siteStatusTag" class="status-tag"><span class="led live"></span>SITE ACQUIRED</span>
-          <button id="viewToggleButton" class="view-toggle" type="button" hidden>[⊕ MAP VIEW]</button>
+          <button id="viewToggleButton" class="view-toggle" type="button" hidden>[&oplus; MAP VIEW]</button>
           <button id="fullScreenToggleButton" class="view-toggle" type="button" hidden>[FULL SCREEN]</button>
         </div>
       </header>
