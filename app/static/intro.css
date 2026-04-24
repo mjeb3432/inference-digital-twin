@@ -137,6 +137,63 @@
 }
 
 /* ============================================================
+   HUD corner brackets — pure CSS, always visible
+   ============================================================ */
+
+.intro-bg::before,
+.intro-bg::after {
+  content: "";
+  position: absolute;
+  width: 28px;
+  height: 28px;
+  opacity: 0;
+  animation: intro-fade-in 600ms ease-out 300ms forwards;
+  pointer-events: none;
+}
+
+/* Top-left */
+.intro-bg::before {
+  top: 18px;
+  left: 18px;
+  border-top: 1px solid rgba(245, 166, 35, 0.65);
+  border-left: 1px solid rgba(245, 166, 35, 0.65);
+}
+
+/* Top-right */
+.intro-bg::after {
+  top: 18px;
+  right: 18px;
+  border-top: 1px solid rgba(245, 166, 35, 0.65);
+  border-right: 1px solid rgba(245, 166, 35, 0.65);
+}
+
+/* Bottom brackets via the grid child pseudo-elements */
+.intro-grid::before,
+.intro-grid::after {
+  content: "";
+  position: absolute;
+  width: 28px;
+  height: 28px;
+  opacity: 0;
+  animation: intro-fade-in 600ms ease-out 300ms forwards;
+  pointer-events: none;
+}
+
+.intro-grid::before {
+  bottom: 18px;
+  left: 18px;
+  border-bottom: 1px solid rgba(245, 166, 35, 0.65);
+  border-left: 1px solid rgba(245, 166, 35, 0.65);
+}
+
+.intro-grid::after {
+  bottom: 18px;
+  right: 18px;
+  border-bottom: 1px solid rgba(245, 166, 35, 0.65);
+  border-right: 1px solid rgba(245, 166, 35, 0.65);
+}
+
+/* ============================================================
    WebGL canvas (sits between the CSS bg and the text)
    ============================================================ */
 
@@ -178,7 +235,7 @@
   color: rgba(255, 255, 255, 0.6);
   margin: 0 0 28px 0;
   opacity: 0;
-  animation: intro-fade-in 700ms ease-out 200ms forwards;
+  animation: intro-fade-in 900ms ease-out 400ms forwards;
   text-transform: uppercase;
 }
 
@@ -223,8 +280,8 @@
   -webkit-text-fill-color: transparent;
 }
 
-.intro-title .word:nth-child(1) { animation-delay: 480ms; }
-.intro-title .word:nth-child(2) { animation-delay: 640ms; }
+.intro-title .word:nth-child(1) { animation-delay: 700ms; }
+.intro-title .word:nth-child(2) { animation-delay: 920ms; }
 
 .intro-subtitle {
   font-family: "Plus Jakarta Sans", "Inter", ui-sans-serif, system-ui, sans-serif;
@@ -235,7 +292,7 @@
   margin: 26px auto 0 auto;
   max-width: 720px;
   opacity: 0;
-  animation: intro-fade-in 900ms ease-out 1300ms forwards;
+  animation: intro-fade-in 900ms ease-out 1900ms forwards;
 }
 
 .intro-meta {
@@ -251,7 +308,7 @@
   letter-spacing: 0.24em;
   color: rgba(255, 255, 255, 0.45);
   opacity: 0;
-  animation: intro-fade-in 800ms ease-out 1600ms forwards;
+  animation: intro-fade-in 800ms ease-out 2800ms forwards;
   text-transform: uppercase;
 }
 
@@ -286,7 +343,7 @@
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
   opacity: 0;
-  animation: intro-fade-in 900ms ease-out 2100ms forwards, intro-cta-glow 2.6s ease-in-out 2100ms infinite;
+  animation: intro-fade-in 900ms ease-out 5000ms forwards, intro-cta-glow 2.6s ease-in-out 5000ms infinite;
   transition: background 160ms ease, border-color 160ms ease, transform 160ms ease;
 }
 
@@ -326,7 +383,7 @@
   padding: 6px 10px;
   cursor: pointer;
   opacity: 0;
-  animation: intro-fade-in 600ms ease-out 800ms forwards;
+  animation: intro-fade-in 600ms ease-out 1200ms forwards;
   transition: color 160ms ease, border-color 160ms ease;
 }
 

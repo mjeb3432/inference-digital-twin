@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=IBM+Plex+Mono:wght@400;500&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/intro.css?v=20260423d" />
+  <link rel="stylesheet" href="/static/intro.css?v=20260424a" />
   <link rel="stylesheet" href="/static/forge.css?v=20260423d" />
 </head>
 <body class="forge-page">
@@ -66,7 +66,6 @@
       var overlay = document.getElementById('introOverlay');
       if (!overlay) return;
 
-      var AUTO_DISMISS_MS = 6500;
       var mountedAt = Date.now();
       var dismissed = false;
 
@@ -107,7 +106,6 @@
         dismiss();
       });
 
-      setTimeout(dismiss, AUTO_DISMISS_MS);
     })();
   </script>
 
@@ -120,7 +118,7 @@
     }
   </script>
 
-  <script type="module" src="/static/intro.js?v=20260423c"></script>
+  <script type="module" src="/static/intro.js?v=20260424a"></script>
   <script src="/static/forge.js?v=20260417b" defer></script>
 
   <div class="desktop-banner" role="status">BEST VIEWED ON DESKTOP (1024PX+)</div>

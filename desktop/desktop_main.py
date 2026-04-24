@@ -44,7 +44,6 @@ def main():
     from desktop.utils.resource import resource_path
     from desktop.server_thread import ServerThread
     from desktop.app_manager import AppManager
-    from desktop.screens.space_title_screen import SpaceTitleScreen
     from desktop.screens.wbr_title_screen import WBRTitleScreen
 
     app = QApplication(sys.argv)
@@ -54,22 +53,18 @@ def main():
 
     manager = AppManager()
 
-    # Start the FastAPI server in the background (runs during title screens)
+    # Start the FastAPI server in the background (runs during title screen)
     manager.server_thread = ServerThread()
     manager.server_thread.start()
 
-    # Create title screens
-    manager.space_screen = SpaceTitleScreen()
+    # Chain: wbr → main app (earth opening removed)
     manager.wbr_screen = WBRTitleScreen()
-
-    # Chain: space → wbr → main app
-    manager.space_screen.transition_to_next.connect(manager.wbr_screen.show)
     manager.wbr_screen.transition_to_next.connect(manager.show_main_app)
 
     app.aboutToQuit.connect(manager.cleanup, Qt.ConnectionType.DirectConnection)
 
     # Launch the opening sequence
-    manager.space_screen.show()
+    manager.wbr_screen.show()
 
     sys.exit(app.exec())
 

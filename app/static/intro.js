@@ -150,8 +150,8 @@ async function boot(root) {
     uniforms.uTime.value = t;
     uniforms.uProgress.value = Math.sin(t * 0.5) * 0.5 + 0.5;
 
-    // Fade in over the first ~1.5 seconds.
-    uniforms.uOpacity.value = Math.min(1, t / 1.5);
+    // Fade in over the first ~4 seconds.
+    uniforms.uOpacity.value = Math.min(1, t / 4.0);
 
     try {
       renderer.render(scene, camera);
@@ -223,14 +223,14 @@ const FRAG = /* glsl */ `
   void main() {
     // 1. Depth-parallax sample of the photograph.
     float depth = texture2D(uDepth, vUv).r;
-    float strength = 0.012;
+    float strength = 0.018;
     vec2 parallaxUv = vUv + depth * uPointer * strength;
     vec3 tMap = texture2D(uMap, parallaxUv).rgb;
 
     // Boost the photograph a touch so the reds pop on darker server rooms.
     tMap = pow(tMap, vec3(0.92)) * 1.08;
 
-    // 2. Red dot-flow mask (tiled dots * cell-noise * depth gate).
+    // 2. Amber dot-flow mask (tiled dots * cell-noise * depth gate).
     vec2 tUv = vec2(vUv.x * uAspect, vUv.y);
     float tiling = 120.0;
     vec2 tiledUv = mod(tUv * tiling, 2.0) - 1.0;
@@ -239,30 +239,31 @@ const FRAG = /* glsl */ `
     float dotShape = smoothstep(0.5, 0.49, dist) * brightness;
 
     // A narrow band of dots that follows the current "progress" depth.
-    float flow = 1.0 - smoothstep(0.0, 0.02, abs(depth - uProgress));
-    vec3  mask = vec3(dotShape * flow * 10.0, 0.0, 0.0);
+    float flow = 1.0 - smoothstep(0.0, 0.025, abs(depth - uProgress));
+    // Amber: (245/255, 166/255, 35/255)
+    vec3  mask = vec3(dotShape * flow * 12.0) * vec3(0.961, 0.651, 0.137);
 
     vec3 blended = blendScreen(tMap, mask);
 
-    // 3. Vertical red scan line — sweeps top to bottom on the progress uniform.
-    float scanWidth = 0.05;
+    // 3. Amber scan line — sweeps top to bottom on the progress uniform.
+    float scanWidth = 0.08;
     float scanLine  = smoothstep(0.0, scanWidth, abs(vUv.y - uProgress));
-    vec3  redOverlay = vec3(1.0, 0.08, 0.08) * (1.0 - scanLine) * 0.55;
-    vec3  withScan = mix(blended, blended + redOverlay,
-                         smoothstep(0.9, 1.0, 1.0 - scanLine));
+    vec3  amberOverlay = vec3(0.961, 0.651, 0.137) * (1.0 - scanLine) * 0.65;
+    vec3  withScan = mix(blended, blended + amberOverlay,
+                         smoothstep(0.88, 1.0, 1.0 - scanLine));
 
-    // 4. Cheap bloom-like lift: take the bright channel and add back.
+    // 4. Bloom-like lift: take the bright channel and add back at higher gain.
     float lum = max(max(withScan.r, withScan.g), withScan.b);
-    vec3  bloomish = withScan * smoothstep(0.6, 1.1, lum) * 0.6;
+    vec3  bloomish = withScan * smoothstep(0.55, 1.05, lum) * 0.8;
     vec3  finalCol = withScan + bloomish;
 
     // 5. Vignette to keep focus centered.
     float r = length(vUv - 0.5);
-    float vignette = smoothstep(0.95, 0.35, r);
-    finalCol *= (0.55 + 0.55 * vignette);
+    float vignette = smoothstep(0.95, 0.32, r);
+    finalCol *= (0.50 + 0.62 * vignette);
 
     // 6. Warm color grade toward the Forge amber palette.
-    finalCol = mix(finalCol, finalCol * vec3(1.08, 0.96, 0.82), 0.35);
+    finalCol = mix(finalCol, finalCol * vec3(1.10, 0.94, 0.78), 0.40);
 
     gl_FragColor = vec4(finalCol, uOpacity);
   }
