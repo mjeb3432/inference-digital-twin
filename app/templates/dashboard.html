@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{ title }} · Inference Digital Twin</title>
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Comfortaa:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/global-nav.css?v=20260424" />
+  <link rel="stylesheet" href="/static/dashboard.css?v=20260424" />
+</head>
+<body class="dashboard-page" data-active-nav="dashboard">
+
+  <!-- GLOBAL NAVIGATION BAR -->
+  <nav class="global-nav" aria-label="Primary">
+    <a href="/forge" class="global-nav-brand">
+      <span class="global-nav-dot" aria-hidden="true"></span>
+      THE FORGE
+    </a>
+    <div class="global-nav-links">
+      <a href="/forge" class="global-nav-link" data-nav="build">BUILD</a>
+      <a href="/dashboard" class="global-nav-link" data-nav="dashboard">DASHBOARD</a>
+      <a href="/control-room" class="global-nav-link" data-nav="control-room">CONTROL ROOM</a>
+    </div>
+    <div class="global-nav-meta">
+      <span class="global-nav-status"><span class="led"></span>LIVE</span>
+    </div>
+  </nav>
+
+  <main id="dashboardRoot" class="dashboard-root">
+    <!-- LEFT RAIL: FACILITY HEALTH & PRESETS -->
+    <aside class="dashboard-left" aria-label="Facility health and presets">
+      <header class="left-header">
+        <p class="kicker">FACILITY HEALTH</p>
+        <h2>TOR-DC-01 · Toronto</h2>
+      </header>
+
+      <div class="health-ring-wrap" aria-label="Global health ring">
+        <svg viewBox="0 0 140 140" class="health-ring" role="img" aria-label="Global health percentage">
+          <circle cx="70" cy="70" r="56" class="ring-base"></circle>
+          <circle id="healthRingStroke" cx="70" cy="70" r="56" class="ring-progress" style="stroke-dashoffset: 100;"></circle>
+        </svg>
+        <div class="health-ring-copy">
+          <span id="healthRingValue" class="mono">94%</span>
+          <small class="muted">Global Health</small>
+        </div>
+      </div>
+
+      <div class="gauge-stack">
+        <div class="gauge-block">
+          <div class="gauge-label-row">
+            <span>Power Draw</span>
+            <span id="powerGaugeLabel" class="mono">3.2 MW</span>
+          </div>
+          <div class="seg-gauge"><span id="powerGaugeFill" class="seg-fill" style="width: 64%;"></span></div>
+        </div>
+        <div class="gauge-block">
+          <div class="gauge-label-row">
+            <span>Cooling Temperature</span>
+            <span id="tempGaugeLabel" class="mono">22.4 C</span>
+          </div>
+          <div class="thermo-gauge"><span id="tempGaugeFill" class="thermo-fill" style="width: 56%;"></span></div>
+        </div>
+      </div>
+
+      <section class="left-panel">
+        <h3>ALERTS</h3>
+        <div id="alertsList" class="alerts-list">
+          <div class="alert-item alert-warn">
+            <span class="alert-icon">[!]</span>
+            <div class="alert-text">
+              <strong>RACK-C3</strong><br />
+              <small>CPU Thermal Warning</small>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="left-panel">
+        <h3>PRESETS</h3>
+        <div class="preset-cards" id="presetCards">
+          <button class="preset-card" data-preset="baseline">
+            <span class="preset-label">Baseline</span>
+            <span class="preset-hint">100% CPU, 75% MEM</span>
+          </button>
+          <button class="preset-card" data-preset="high-compute">
+            <span class="preset-label">High Compute</span>
+            <span class="preset-hint">95% CPU, 90% MEM</span>
+          </button>
+        </div>
+      </section>
+    </aside>
+
+    <!-- CENTER: RACK FLOOR GRID -->
+    <section class="dashboard-center" aria-label="Rack floor overview">
+      <header class="center-header">
+        <p class="kicker">RACK FLOOR VIEW</p>
+        <h2>INFERENCE FABRIC — 4×5 RACK GRID</h2>
+      </header>
+
+      <div id="rackGrid" class="rack-grid"></div>
+    </section>
+
+    <!-- RIGHT RAIL: ASSET DETAIL & CONTROLS -->
+    <aside class="dashboard-right" aria-label="Asset inspector and controls">
+      <section class="right-header">
+        <p class="kicker">SELECTED ASSET</p>
+        <h2 id="inspectorTitle">RACK-A1</h2>
+      </section>
+
+      <div class="asset-details" id="assetDetails">
+        <div class="kv-pair">
+          <span class="key">Hostname</span>
+          <span class="value mono">infer-a1-host-01</span>
+        </div>
+        <div class="kv-pair">
+          <span class="key">IP Address</span>
+          <span class="value mono">10.1.1.101</span>
+        </div>
+        <div class="kv-pair">
+          <span class="key">OS</span>
+          <span class="value mono">Ubuntu 22.04 LTS</span>
+        </div>
+        <div class="kv-pair">
+          <span class="key">Uptime</span>
+          <span class="value mono">187d 14h 32m</span>
+        </div>
+        <div class="kv-pair">
+          <span class="key">Last Ping</span>
+          <span class="value mono">2ms ago</span>
+        </div>
+        <div class="kv-pair">
+          <span class="key">Firmware</span>
+          <span class="value mono">2024.Q1.19</span>
+        </div>
+      </div>
+
+      <section class="control-section">
+        <h3>POWER STATE</h3>
+        <div class="toggle-group">
+          <button class="toggle-btn active" data-state="on">ON</button>
+          <button class="toggle-btn" data-state="off">OFF</button>
+        </div>
+      </section>
+
+      <section class="control-section">
+        <h3>ACTIONS</h3>
+        <div class="action-buttons">
+          <button class="confirm-button" type="button">REBOOT</button>
+          <button class="confirm-button" type="button">BENCHMARK</button>
+        </div>
+      </section>
+
+      <section class="workload-section">
+        <h3>WORKLOAD SLIDERS</h3>
+        <div class="slider-group">
+          <label>Node Count</label>
+          <div class="slider-container">
+            <button class="slider-btn" type="button" data-delta="-1">−</button>
+            <input type="number" class="slider-input" value="8" min="1" max="64" />
+            <button class="slider-btn" type="button" data-delta="+1">+</button>
+          </div>
+        </div>
+        <div class="slider-group">
+          <label>QPS Target</label>
+          <div class="slider-container">
+            <button class="slider-btn" type="button" data-delta="-100">−</button>
+            <input type="number" class="slider-input" value="5000" min="100" max="50000" />
+            <button class="slider-btn" type="button" data-delta="+100">+</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="metrics-section">
+        <h3>LIVE METRICS</h3>
+        <div class="live-metric">
+          <span class="metric-label">Tokens/sec</span>
+          <span class="metric-value mono">124.5k</span>
+        </div>
+        <div class="live-metric">
+          <span class="metric-label">GPU Temp</span>
+          <span class="metric-value mono">81°C</span>
+        </div>
+        <div class="live-metric">
+          <span class="metric-label">Memory BW</span>
+          <span class="metric-value mono">1.8 TB/s</span>
+        </div>
+        <div class="live-metric">
+          <span class="metric-label">PCIe Latency</span>
+          <span class="metric-value mono">850ns</span>
+        </div>
+        <div class="live-metric">
+          <span class="metric-label">Fan Speed</span>
+          <span class="metric-value mono">68%</span>
+        </div>
+        <div class="live-metric">
+          <span class="metric-label">PSU Efficiency</span>
+          <span class="metric-value mono">94.2%</span>
+        </div>
+      </section>
+
+      <section class="event-log-section">
+        <h3>NOC EVENT LOG</h3>
+        <div class="event-log" id="eventLog">
+          <div class="event-item event-info">
+            <span class="time">14:32:10</span>
+            <span class="text">Rack online</span>
+          </div>
+          <div class="event-item event-warn">
+            <span class="time">14:25:44</span>
+            <span class="text">Thermal alert (resolved)</span>
+          </div>
+        </div>
+      </section>
+    </aside>
+  </main>
+
+  <script src="/static/dashboard.js?v=20260424" defer></script>
+</body>
+</html>

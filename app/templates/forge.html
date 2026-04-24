@@ -10,8 +10,25 @@
   <link href="https://fonts.googleapis.com/css2?family=Comfortaa:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/static/intro.css?v=20260423e" />
   <link rel="stylesheet" href="/static/forge.css?v=20260417b" />
+  <link rel="stylesheet" href="/static/global-nav.css?v=20260424" />
 </head>
-<body class="forge-page">
+<body class="forge-page" data-active-nav="build">
+
+  <!-- GLOBAL NAVIGATION BAR -->
+  <nav class="global-nav" aria-label="Primary">
+    <a href="/forge" class="global-nav-brand">
+      <span class="global-nav-dot" aria-hidden="true"></span>
+      THE FORGE
+    </a>
+    <div class="global-nav-links">
+      <a href="/forge" class="global-nav-link" data-nav="build">BUILD</a>
+      <a href="/dashboard" class="global-nav-link" data-nav="dashboard">DASHBOARD</a>
+      <a href="/control-room" class="global-nav-link" data-nav="control-room">CONTROL ROOM</a>
+    </div>
+    <div class="global-nav-meta">
+      <span class="global-nav-status"><span class="led"></span>LIVE</span>
+    </div>
+  </nav>
 
   <!-- ============================================================
        OPENING INTRO — hero sequence.
@@ -120,11 +137,12 @@
 
   <script type="module" src="/static/intro.js?v=20260423e"></script>
   <script src="/static/forge.js?v=20260417b" defer></script>
+  <script src="/static/forge-zoom.js?v=20260424a" defer></script>
 
   <div class="desktop-banner" role="status">BEST VIEWED ON DESKTOP (1024PX+)</div>
   <div class="forge-backdrop" aria-hidden="true"></div>
 
-  <div id="forgeRoot" class="forge-root">
+  <div id="forgeRoot" class="forge-root" style="height: calc(100vh - 56px);">
     <aside id="forgeLeftRail" class="forge-left" aria-label="Decision rail">
       <header class="left-header">
         <p class="kicker">AI DATA CENTER CONSTRUCTION SIMULATOR</p>

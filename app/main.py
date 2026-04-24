@@ -53,6 +53,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def favicon() -> RedirectResponse:
         return RedirectResponse(url="/static/favicon.svg")
 
+    @app.get("/dashboard", response_class=HTMLResponse)
+    def dashboard(request: Request) -> HTMLResponse:
+        return templates.TemplateResponse(
+            request,
+            "dashboard.html",
+            {
+                "active_nav": "dashboard",
+                "title": "Rack Floor Dashboard",
+            },
+        )
+
+    @app.get("/control-room", response_class=HTMLResponse)
+    def control_room(request: Request) -> HTMLResponse:
+        return templates.TemplateResponse(
+            request,
+            "control-room.html",
+            {
+                "active_nav": "control-room",
+                "title": "Inference Fabric Control Room",
+            },
+        )
+
     @app.get("/explorer", response_class=HTMLResponse)
     def explorer(request: Request) -> HTMLResponse:
         return templates.TemplateResponse(
