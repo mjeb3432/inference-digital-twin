@@ -10,7 +10,7 @@ from typing import Any
 
 from app.artifacts import ArtifactRegistry
 from app.db import Database
-from app.errors import AppError, InternalError, ValidationError
+from app.errors import AppError, CalibrationOutOfRangeError, InternalError, ValidationError
 from app.hashing import canonicalize, scenario_hash
 from app.modules import MODULE_ORDER, MODULE_RUNNERS
 from app.run_queue import QueueJob, RunQueue
@@ -76,13 +76,23 @@ class Orchestrator:
         declared_version = calibration.get("artifact_version")
 
         if declared_id != self.artifacts.artifact_id or declared_version != self.artifacts.artifact_version:
-            raise ValidationError(
+            raise CalibrationOutOfRangeError(
                 "Scenario calibration is incompatible with loaded artifacts",
                 details={
                     "declared_artifact_id": declared_id,
                     "declared_artifact_version": declared_version,
                     "loaded_artifact_id": self.artifacts.artifact_id,
                     "loaded_artifact_version": self.artifacts.artifact_version,
+                },
+            )
+
+        declared_assumptions = scenario.get("assumptions_registry_version")
+        if declared_assumptions is not None and declared_assumptions != self.artifacts.assumptions_registry_version:
+            raise CalibrationOutOfRangeError(
+                "Scenario assumptions_registry_version is incompatible with loaded artifacts",
+                details={
+                    "declared_assumptions_registry_version": declared_assumptions,
+                    "loaded_assumptions_registry_version": self.artifacts.assumptions_registry_version,
                 },
             )
 

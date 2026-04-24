@@ -129,15 +129,45 @@ def test_validate_endpoint_does_not_enqueue_run(client) -> None:
     assert after.json()["items"] == []
 
 
-def test_calibration_mismatch_rejected(client) -> None:
+def test_calibration_version_mismatch_rejected(client) -> None:
     scenario = valid_scenario()
     scenario["calibration"]["artifact_version"] = "v999"
 
     response = client.post("/api/runs", json=scenario)
     assert response.status_code == 400
     payload = response.json()
-    assert payload["error_class"] == "validation"
+    assert payload["error_class"] == "calibration_out_of_range"
     assert "incompatible" in payload["message"].lower()
+
+
+def test_calibration_id_mismatch_rejected(client) -> None:
+    scenario = valid_scenario()
+    scenario["calibration"]["artifact_id"] = "coefficients-wrong-artifact"
+
+    response = client.post("/api/runs", json=scenario)
+    assert response.status_code == 400
+    payload = response.json()
+    assert payload["error_class"] == "calibration_out_of_range"
+    assert "incompatible" in payload["message"].lower()
+
+
+def test_assumptions_registry_version_mismatch_rejected(client) -> None:
+    scenario = valid_scenario()
+    scenario["assumptions_registry_version"] = "v999"
+
+    response = client.post("/api/runs", json=scenario)
+    assert response.status_code == 400
+    payload = response.json()
+    assert payload["error_class"] == "calibration_out_of_range"
+    assert "assumptions_registry_version" in payload["message"].lower()
+
+
+def test_assumptions_registry_version_omitted_is_accepted(client) -> None:
+    scenario = valid_scenario()
+    assert "assumptions_registry_version" not in scenario
+
+    response = client.post("/api/runs", json=scenario)
+    assert response.status_code == 202
 
 
 def test_failed_stage_transitions_to_failed(client, monkeypatch) -> None:

@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://inference-digital-twin.local/contracts/v1/artifact-coefficients.v1.schema.json",
+  "title": "ArtifactCoefficientsV1",
+  "description": "Schema for the versioned coefficient artifact file loaded by ArtifactRegistry.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "artifact_id",
+    "artifact_version",
+    "assumptions_registry_version",
+    "module_versions",
+    "coefficients"
+  ],
+  "properties": {
+    "artifact_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "artifact_version": {
+      "type": "string",
+      "pattern": "^v[0-9]+(\\.[0-9]+){0,2}$"
+    },
+    "assumptions_registry_version": {
+      "type": "string",
+      "pattern": "^v[0-9]+(\\.[0-9]+){0,2}$"
+    },
+    "module_versions": {
+      "type": "object",
+      "required": ["hardware", "interconnect", "runtime", "orchestration", "energy"],
+      "additionalProperties": false,
+      "properties": {
+        "hardware":       { "type": "string", "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$" },
+        "interconnect":   { "type": "string", "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$" },
+        "runtime":        { "type": "string", "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$" },
+        "orchestration":  { "type": "string", "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$" },
+        "energy":         { "type": "string", "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$" }
+      }
+    },
+    "coefficients": {
+      "type": "object",
+      "required": ["hardware", "interconnect", "runtime", "orchestration", "energy"],
+      "additionalProperties": false,
+      "properties": {
+        "hardware": {
+          "type": "object",
+          "required": [
+            "base_ttft_ms",
+            "base_tpot_ms",
+            "throughput_scale",
+            "concurrency_scale",
+            "precision_factors"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "base_ttft_ms":     { "type": "number", "exclusiveMinimum": 0 },
+            "base_tpot_ms":     { "type": "number", "exclusiveMinimum": 0 },
+            "throughput_scale": { "type": "number", "exclusiveMinimum": 0 },
+            "concurrency_scale":{ "type": "number", "exclusiveMinimum": 0 },
+            "precision_factors": {
+              "type": "object",
+              "required": ["fp16", "bf16", "fp8", "int8"],
+              "additionalProperties": false,
+              "properties": {
+                "fp16": { "type": "number", "exclusiveMinimum": 0 },
+                "bf16": { "type": "number", "exclusiveMinimum": 0 },
+                "fp8":  { "type": "number", "exclusiveMinimum": 0 },
+                "int8": { "type": "number", "exclusiveMinimum": 0 }
+              }
+            }
+          }
+        },
+        "interconnect": {
+          "type": "object",
+          "required": ["latency_scale", "throughput_scale"],
+          "additionalProperties": false,
+          "properties": {
+            "latency_scale":    { "type": "number", "exclusiveMinimum": 0 },
+            "throughput_scale": { "type": "number", "exclusiveMinimum": 0 }
+          }
+        },
+        "runtime": {
+          "type": "object",
+          "required": ["throughput_scale", "concurrency_scale"],
+          "additionalProperties": false,
+          "properties": {
+            "throughput_scale":  { "type": "number", "exclusiveMinimum": 0 },
+            "concurrency_scale": { "type": "number", "exclusiveMinimum": 0 }
+          }
+        },
+        "orchestration": {
+          "type": "object",
+          "required": ["throughput_scale", "concurrency_scale", "latency_scale"],
+          "additionalProperties": false,
+          "properties": {
+            "throughput_scale":  { "type": "number", "exclusiveMinimum": 0 },
+            "concurrency_scale": { "type": "number", "exclusiveMinimum": 0 },
+            "latency_scale":     { "type": "number", "exclusiveMinimum": 0 }
+          }
+        },
+        "energy": {
+          "type": "object",
+          "required": ["platform_overhead_watts", "infrastructure_usd_per_hour_per_gpu"],
+          "additionalProperties": false,
+          "properties": {
+            "platform_overhead_watts":              { "type": "number", "minimum": 0 },
+            "infrastructure_usd_per_hour_per_gpu":  { "type": "number", "minimum": 0 }
+          }
+        }
+      }
+    }
+  }
+}
