@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.2.0] - 2026-04-23
+
+### Performance
+- Introduced `AppServices` lazy-init layer — heavy backend services (DB, orchestrator, run queue) now warm in a background thread, so the Forge UI loads immediately instead of blocking on startup.
+- Space title screen intro reduced from 10s to 3.2s by default (`IDT_FAST_INTRO=1`). Set `IDT_FAST_INTRO=0` to restore the cinematic version.
+
+### Changed
+- API routes now return `503 Service Unavailable` during the warm-up window instead of crashing with a 500.
+- `/api/health` reports `"warming"` status while services initialize, and `"error"` if initialization fails — so clients can tell the difference.
+- Desktop intro screens (space title, WBR title) polished with cleaner visuals and updated brand copy: "WATT-BIT INTELLIGENCE / INFERENCE DIGITAL TWIN / Simulate before you spend."
+- Removed stale `docs/notion_workspace/` files that were no longer maintained.
+
+### Fixed
+- `AppError.__post_init__` now calls `Exception.__init__` directly to avoid MRO issues with dataclass inheritance.
+
+### Added
+- `tests/test_desktop_intro.py` — regression tests for desktop screen brand copy and asset references.
+- `tests/test_integration.py` — integration test verifying Forge stays available if backend warmup fails.
+
 ## [0.1.1.0] - 2026-03-28
 
 ### Added

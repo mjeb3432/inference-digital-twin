@@ -22,7 +22,7 @@ class AppError(Exception):
     def __post_init__(self) -> None:
         if self.error_class not in ERROR_CLASSES:
             raise ValueError(f"Unknown error class: {self.error_class}")
-        super().__init__(self.message)
+        Exception.__init__(self, self.message)
 
 
 class ValidationError(AppError):

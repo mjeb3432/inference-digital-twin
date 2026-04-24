@@ -4,27 +4,43 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from app.errors import AppError
+from app.services import ServiceInitializationError, get_services
 
 router = APIRouter(prefix="/api")
 
 
+def runtime_or_503(request: Request):
+    try:
+        return get_services(request.app).get()
+    except ServiceInitializationError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
 @router.get("/health")
 def health(request: Request) -> dict:
-    queue_depth = request.app.state.run_queue.depth
+    services = get_services(request.app)
+    if services.failed:
+        return {
+            "status": "error",
+            "queue_depth": 0,
+            "message": services.error_message,
+        }
+    queue_depth = services.get().run_queue.depth if services.ready else 0
     return {
-        "status": "ok",
+        "status": "ok" if services.ready else "warming",
         "queue_depth": queue_depth,
     }
 
 
 @router.get("/runs")
 def list_runs(request: Request) -> dict:
-    return {"items": request.app.state.orchestrator.list_runs(limit=100)}
+    runtime = runtime_or_503(request)
+    return {"items": runtime.orchestrator.list_runs(limit=100)}
 
 
 @router.post("/validate-scenario")
 def validate_scenario(request: Request, payload: dict) -> JSONResponse:
-    orchestrator = request.app.state.orchestrator
+    orchestrator = runtime_or_503(request).orchestrator
     try:
         response = orchestrator.validate_scenario(payload)
         return JSONResponse(response, status_code=200)
@@ -179,7 +195,7 @@ def presets() -> dict:
 
 @router.post("/runs")
 def submit_run(request: Request, payload: dict) -> JSONResponse:
-    orchestrator = request.app.state.orchestrator
+    orchestrator = runtime_or_503(request).orchestrator
     try:
         response = orchestrator.submit_scenario(payload)
         return JSONResponse(response, status_code=202)
@@ -196,7 +212,8 @@ def submit_run(request: Request, payload: dict) -> JSONResponse:
 
 @router.get("/runs/{run_id}")
 def get_run(request: Request, run_id: str) -> dict:
-    run = request.app.state.orchestrator.get_run(run_id)
+    runtime = runtime_or_503(request)
+    run = runtime.orchestrator.get_run(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
     return run
@@ -204,7 +221,8 @@ def get_run(request: Request, run_id: str) -> dict:
 
 @router.get("/reports/{report_id}")
 def get_report(request: Request, report_id: str) -> dict:
-    report = request.app.state.orchestrator.get_report(report_id)
+    runtime = runtime_or_503(request)
+    report = runtime.orchestrator.get_report(report_id)
     if report is None:
         raise HTTPException(status_code=404, detail="Report not found")
     return report
@@ -212,12 +230,14 @@ def get_report(request: Request, report_id: str) -> dict:
 
 @router.get("/reports")
 def list_reports(request: Request) -> dict:
-    return {"items": request.app.state.orchestrator.list_reports(limit=100)}
+    runtime = runtime_or_503(request)
+    return {"items": runtime.orchestrator.list_reports(limit=100)}
 
 
 @router.get("/reports/{report_id}/provenance")
 def get_provenance(request: Request, report_id: str) -> dict:
-    report = request.app.state.orchestrator.get_report(report_id)
+    runtime = runtime_or_503(request)
+    report = runtime.orchestrator.get_report(report_id)
     if report is None:
         raise HTTPException(status_code=404, detail="Report not found")
     return {
@@ -231,10 +251,11 @@ def get_provenance(request: Request, report_id: str) -> dict:
 
 @router.get("/reports/{report_id}/bundle")
 def export_bundle(request: Request, report_id: str) -> dict:
-    report = request.app.state.orchestrator.get_report(report_id)
+    runtime = runtime_or_503(request)
+    report = runtime.orchestrator.get_report(report_id)
     if report is None:
         raise HTTPException(status_code=404, detail="Report not found")
-    run = request.app.state.orchestrator.get_run(report["run_id"])
+    run = runtime.orchestrator.get_run(report["run_id"])
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
 

@@ -1,6 +1,12 @@
 from __future__ import annotations
 
 import time
+from pathlib import Path
+
+from fastapi.testclient import TestClient
+
+from app.config import Settings
+from app.main import create_app
 
 
 def valid_scenario() -> dict:
@@ -179,3 +185,32 @@ def test_cached_run_has_own_report_and_cache_stage(client) -> None:
     stages = {stage["stage_name"]: stage for stage in payload["stages"]}
     assert "cache_hit" in stages
     assert stages["cache_hit"]["status"] == "success"
+
+
+def test_forge_route_stays_available_if_runtime_warmup_fails(tmp_path: Path, monkeypatch) -> None:
+    def explode(_self):
+        raise RuntimeError("warmup exploded")
+
+    monkeypatch.setattr(create_app.__globals__["AppServices"], "_build_bundle", explode)
+
+    settings = Settings(
+        base_dir=Path.cwd(),
+        database_path=tmp_path / "test.db",
+        contracts_dir=Path.cwd() / "contracts" / "v1",
+        artifacts_path=Path.cwd() / "artifacts" / "coefficients.v1.json",
+        inline_execution=True,
+        worker_poll_interval_seconds=0.01,
+    )
+    app = create_app(settings=settings)
+
+    with TestClient(app) as test_client:
+        forge = test_client.get("/forge")
+        assert forge.status_code == 200
+        assert "THE FORGE" in forge.text
+
+        health = test_client.get("/api/health")
+        assert health.status_code == 200
+        assert health.json()["status"] == "error"
+
+        runs = test_client.get("/api/runs")
+        assert runs.status_code == 503

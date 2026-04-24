@@ -10,48 +10,26 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app.api.routes import router as api_router
-from app.artifacts import ArtifactRegistry
 from app.config import Settings, load_settings
-from app.db import Database
-from app.orchestrator import Orchestrator
-from app.run_queue import RunQueue
-from app.validation import SchemaRegistry
+from app.services import AppServices, ServiceInitializationError, get_services
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or load_settings()
-
-    db = Database(settings.database_path)
-    db.init_schema()
-
-    schemas = SchemaRegistry(settings.contracts_dir)
-    artifacts = ArtifactRegistry(settings.artifacts_path)
-    run_queue = RunQueue(settings.worker_poll_interval_seconds)
-    orchestrator = Orchestrator(
-        db=db,
-        schemas=schemas,
-        artifacts=artifacts,
-        run_queue=run_queue,
-        inline_execution=settings.inline_execution,
-    )
+    services = AppServices(settings)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-        orchestrator.start_worker()
+        services.warm_in_background()
         try:
             yield
         finally:
-            orchestrator.stop_worker()
-            db.close()
+            services.shutdown()
 
     app = FastAPI(title="Inference Digital Twin", version="0.1.0", lifespan=lifespan)
 
     app.state.settings = settings
-    app.state.db = db
-    app.state.schemas = schemas
-    app.state.artifacts = artifacts
-    app.state.run_queue = run_queue
-    app.state.orchestrator = orchestrator
+    app.state.services = services
 
     static_dir = Path(__file__).resolve().parent / "static"
     template_dir = Path(__file__).resolve().parent / "templates"
@@ -92,7 +70,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/runs/{run_id}", response_class=HTMLResponse)
     def run_details(request: Request, run_id: str) -> HTMLResponse:
-        run = app.state.orchestrator.get_run(run_id)
+        try:
+            run = get_services(request.app).get().orchestrator.get_run(run_id)
+        except ServiceInitializationError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         if run is None:
             raise HTTPException(status_code=404, detail="Run not found")
         return templates.TemplateResponse(
@@ -118,7 +99,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/reports/{report_id}/provenance", response_class=HTMLResponse)
     def report_provenance(request: Request, report_id: str) -> HTMLResponse:
-        report = app.state.orchestrator.get_report(report_id)
+        try:
+            report = get_services(request.app).get().orchestrator.get_report(report_id)
+        except ServiceInitializationError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         if report is None:
             raise HTTPException(status_code=404, detail="Report not found")
         return templates.TemplateResponse(
