@@ -1,0 +1,172 @@
+/* ========================================================================
+   GLOBAL NAVIGATION BAR — appears on /forge, /dashboard, /control-room
+   ======================================================================== */
+
+:root {
+  /* Surfaces */
+  --bg:      #08090B;
+  --surface: #0F1114;
+  --surface2: #171A1F;
+
+  /* Borders */
+  --border:        #23272D;
+  --border-strong: #3A3F47;
+
+  /* Text */
+  --text: #EDEDED;
+  --dim:  #A0A4AB;
+  --dim2: #5C626B;
+
+  /* Accent — Augur mint/lime/sky */
+  --accent:       #33FBD3;
+  --accent-lime:  #7BFF9E;
+  --accent-sky:   #6DD6FF;
+  --accent-glow:  0 0 0 1px #33FBD3, 0 0 18px rgba(51, 251, 211, 0.28);
+
+  /* Fonts */
+  --font-display: "IBM Plex Sans Condensed", "Arial Narrow", sans-serif;
+  --font-ui:      "Inter", system-ui, sans-serif;
+  --font-mono:    "JetBrains Mono", "Fira Code", monospace;
+
+  --transition: all 0.18s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.global-nav {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 56px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  z-index: 1000;
+  font-family: var(--font-ui);
+  font-size: 13px;
+}
+
+.global-nav-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  text-decoration: none;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  min-height: 44px;
+  padding: 0 8px;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.global-nav-brand:hover {
+  color: var(--accent);
+}
+
+.global-nav-brand:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.global-nav-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  background: var(--accent);
+  border-radius: 50%;
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.global-nav-links {
+  display: flex;
+  gap: 24px;
+  align-items: center;
+}
+
+.global-nav-link {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 12px;
+  color: var(--dim);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: var(--transition);
+  cursor: pointer;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
+
+.global-nav-link:hover {
+  color: var(--accent);
+  border-bottom-color: rgba(51, 251, 211, 0.4);
+}
+
+.global-nav-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Active state — driven by body[data-active-nav] attribute */
+body[data-active-nav="build"] .global-nav-link[data-nav="build"],
+body[data-active-nav="dashboard"] .global-nav-link[data-nav="dashboard"],
+body[data-active-nav="control-room"] .global-nav-link[data-nav="control-room"] {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.global-nav-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.global-nav-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--dim);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-family: var(--font-mono);
+  min-height: 44px;
+  padding: 0 8px;
+}
+
+.global-nav-status .led {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  background: var(--accent-lime);
+  border-radius: 50%;
+  box-shadow: 0 0 8px rgba(123, 255, 158, 0.6);
+  animation: blink-led 1.2s ease-in-out infinite;
+}
+
+@keyframes blink-led {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* Adjust body padding to account for fixed nav */
+body {
+  padding-top: 56px;
+}
+
+/* For light overlays or full-height layouts */
+.forge-page,
+.dashboard-page,
+.control-room-page {
+  padding-top: 56px;
+}
