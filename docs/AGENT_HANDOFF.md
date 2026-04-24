@@ -41,7 +41,7 @@ To paste the real version of any stub, replace the file contents with the 21st.d
 ### Aesthetic target (from `DESIGN.md`)
 
 - **Colors:** bg `#08090B`, amber accent `#F5A623`, nominal green `#4ADE80`, teal `#14B8A6`, red accent `#EF4444`. Tokens exposed as Tailwind classes (`bg-forge-bg`, `text-forge-amber`, etc.) and as shadcn CSS vars.
-- **Typography:** Fraunces (display serif, titles), Plus Jakarta Sans (body), IBM Plex Mono (data/kickers). Loaded from Google Fonts in `index.html`.
+- **Typography:** Comfortaa (display, titles — rounded geometric face), Plus Jakarta Sans (body), IBM Plex Mono (data/kickers). Loaded from Google Fonts in `index.html`.
 - **Feel:** "Calm control-room energy. Precise, trustworthy, operationally focused. NOT flashy."
 - **Anti-pattern:** rectangles labelled "SERVER RACK". Flat gradients with emoji icons. Drafts A/B/C failed because they read as "AI slop."
 

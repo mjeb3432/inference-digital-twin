@@ -16,7 +16,7 @@ const config: Config = {
     },
     extend: {
       fontFamily: {
-        display: ['Fraunces', 'Georgia', 'serif'],
+        display: ['Comfortaa', '"Plus Jakarta Sans"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
         sans:    ['"Plus Jakarta Sans"', 'Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
         mono:    ['"IBM Plex Mono"', '"JetBrains Mono"', 'ui-monospace', 'monospace'],
       },

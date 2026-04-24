@@ -94,10 +94,10 @@ class WBRTitleScreen(QWidget):
         text_layout.setContentsMargins(0, 0, 0, 0)
         text_layout.setSpacing(14)
 
-        self._title = QLabel("WATT-BIT INTELLIGENCE")
+        self._title = QLabel("THE FORGE")
         self._title.setStyleSheet(
             f"color:{ICE.name()};"
-            "font-family:'Bahnschrift SemiBold','Segoe UI',sans-serif;"
+            "font-family:'Comfortaa','Plus Jakarta Sans','Segoe UI',sans-serif;"
             "font-size:68px; font-weight:800; letter-spacing:3px;"
         )
 
@@ -106,7 +106,7 @@ class WBRTitleScreen(QWidget):
         self._accent.setFixedWidth(360)
         self._accent.setStyleSheet(
             f"background:qlineargradient(x1:0,y1:0,x2:1,y2:0,"
-            f"stop:0 {ORANGE.name()},stop:1 {CYAN.name()});"
+            f"stop:0 {CYAN.name()},stop:1 {ORANGE.name()});"
             "border-radius:1px;"
         )
 
@@ -144,7 +144,7 @@ class WBRTitleScreen(QWidget):
         hero.addWidget(text_wrap, 1)
         root.addLayout(hero)
 
-        self._footer = QLabel("WATT-BIT INTELLIGENCE")
+        self._footer = QLabel("THE FORGE")
         self._footer.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._footer.setStyleSheet(
             "color:rgba(217,236,255,0.42);"
@@ -156,7 +156,7 @@ class WBRTitleScreen(QWidget):
         self._prompt = QLabel("[ PRESS ENTER OR CLICK TO CONTINUE ]")
         self._prompt.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._prompt.setStyleSheet(
-            "color:rgba(245,166,35,0.72);"
+            "color:rgba(51,251,211,0.72);"
             "font-family:'Consolas','Courier New',monospace;"
             "font-size:12px; letter-spacing:5px;"
         )

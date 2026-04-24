@@ -17,14 +17,14 @@
   - https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch_Dashboards.html
 
 ## Typography
-- **Display/Hero:** Fraunces - Gives the product a distinctive identity in headings while still feeling serious and high-trust.
+- **Display/Hero:** Comfortaa - Rounded geometric display face aligned with the Augur mint/aqua palette; distinctive and calm without feeling generic.
 - **Body:** Plus Jakarta Sans - Clear at small sizes, modern, and excellent for dense dashboard UI copy.
 - **UI/Labels:** Plus Jakarta Sans (same as body) - Keeps controls and content visually unified.
 - **Data/Tables:** IBM Plex Mono - High legibility for IDs, hashes, and metric columns; supports tabular reading patterns.
 - **Code:** JetBrains Mono
 - **Loading:**
   - Google Fonts:
-    - `https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=IBM+Plex+Mono:wght@400;500&family=JetBrains+Mono:wght@400;500&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap`
+    - `https://fonts.googleapis.com/css2?family=Comfortaa:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&family=JetBrains+Mono:wght@400;500&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap`
 - **Scale:**
   - `xs`: 12px / 0.75rem
   - `sm`: 14px / 0.875rem
@@ -81,7 +81,7 @@
   - Restrained semantic color usage for status (success/warning/error) so signals remain obvious.
   - Monospace for hashes/IDs/metrics to reduce misread risk during incident-like review.
 - **Risks (memorable differentiation):**
-  - Serif display heading (Fraunces) in a technical product, to avoid the generic dashboard look.
+  - Rounded geometric display heading (Comfortaa) in a technical product, to avoid the generic dashboard look.
   - Warm-neutral base palette instead of cold blue-gray defaults, to reduce visual fatigue in long review sessions.
   - Subtle blueprint-style background texture in shell regions to reinforce simulation/instrumentation identity.
 

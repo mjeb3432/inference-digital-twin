@@ -10,28 +10,28 @@ APP_MANAGER  = Path.cwd() / "desktop" / "app_manager.py"
 FORGE_HTML   = Path.cwd() / "app" / "templates" / "forge.html"
 
 
-def test_space_title_screen_uses_pixel_earth_and_calgary_lock_copy() -> None:
+def test_space_title_screen_uses_pixel_earth_and_forge_brand_copy() -> None:
     source = SPACE_TITLE.read_text(encoding="utf-8-sig")
 
     assert "earthspin-sheet-citylights.png" in source
     assert "Qt.TransformationMode.FastTransformation" in source
-    assert "CALGARY // AB // CANADA" in source
-    assert "WATT-BIT INTELLIGENCE" in source
+    assert "FACILITY-01 // INGEST // LIVE" in source
+    assert "INFERENCE DIGITAL TWIN" in source
 
 
 def test_wbr_title_screen_brand_copy() -> None:
     source = WBR_TITLE.read_text(encoding="utf-8-sig")
 
-    assert "WATT-BIT INTELLIGENCE" in source
+    assert "THE FORGE" in source
     assert "INFERENCE DIGITAL TWIN" in source
     assert "Simulate before you spend." in source
-    # Eyebrow with Calgary lock removed — should not appear
+    # Eyebrow with Calgary lock removed (scrubbed to FACILITY-01) — should not appear
     assert "CALGARY LOCK" not in source
     assert "LOCAL WORLD MODEL" not in source
     # Prompt for manual dismiss
     assert "PRESS ENTER OR CLICK TO CONTINUE" in source
-    # Footer branding — only Watt-Bit, no Simply Silicon or Augur
-    assert "WATT-BIT INTELLIGENCE" in source
+    # Footer branding — The Forge only, no city/company branding
+    assert "THE FORGE" in source
     assert "SIMPLY SILICON" not in source
 
 
@@ -65,7 +65,7 @@ def test_app_manager_no_space_title_screen() -> None:
 def test_forge_html_no_calgary_or_third_party_branding() -> None:
     source = FORGE_HTML.read_text(encoding="utf-8-sig")
 
-    # Only Watt-Bit branding in the intro — no Calgary, no Simply Silicon, no Augur
+    # Only The Forge branding in the intro — no city, no company branding
     assert "CALGARY" not in source
     assert "SIMPLY SILICON" not in source
     assert "Augur" not in source
