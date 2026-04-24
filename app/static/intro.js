@@ -1,39 +1,42 @@
 /* ============================================================
  *  The Forge — Opening Intro (vanilla JS / WebGL port)
  *  ---------------------------------------------------------
- *  Vanilla-JS port of the `hero-futuristic` React component,
- *  adapted for "THE FORGE" with a data center photograph
- *  instead of the original hand image. Preserves every key
- *  effect from the source:
+ *  Vanilla-JS port of the 21st.dev `hero-futuristic` component.
+ *  Uses the reference image + matching depth map so the scan
+ *  line actually flows through the components of a real data
+ *  center (rack rows, cooling units, aisle perspective) — the
+ *  red dot-flow band rides the depth slice as uProgress sweeps.
  *
+ *  Preserves every key effect from the source:
  *    - depth-mapped parallax (moves with the pointer)
- *    - red dot-flow band sweeping on the depth axis
+ *    - red dot-flow band following the depth slice
  *    - vertical red scan line overlay
  *    - bloom-ish additive glow
  *
- *  Uses three.js WebGL (r160 module) for universal browser
- *  support — WebGPU support is still patchy (Firefox, Safari,
- *  older Chromium). The depth map is SYNTHESIZED from the
- *  photograph on the client (luminance + vertical gradient +
- *  box blur) so we don't need a second hosted asset.
+ *  If the external images fail to load (offline / blocked),
+ *  we fall back to a PROCEDURALLY-GENERATED pixel data center
+ *  painted into an offscreen canvas so the scan always has a
+ *  subject to run over.
  *
  *  Dismiss handlers live in an inline <script> in forge.html
- *  that runs BEFORE this module — so the overlay is always
+ *  that runs BEFORE this module — the overlay is always
  *  dismissable even if this file 404s or WebGL init fails.
  * ============================================================ */
 
 import * as THREE from 'three';
 
 // ---------------------------------------------------------------
-// Config
+// Texture sources — straight from the 21st.dev reference.
+// The pair is a data-center hall with a precomputed depth map,
+// which is what makes the scan "flow through" the geometry.
 // ---------------------------------------------------------------
-// Data-center hot-aisle photograph from Unsplash (CORS-enabled).
-// Server racks with directional blue/teal LED lighting — matches
-// the Forge's "control-room" aesthetic.
-const TEXTURE_URL =
-  'https://images.unsplash.com/photo-1558494949-ef010cbdcc31?auto=format&fit=crop&w=1920&q=80';
+const TEXTUREMAP_SRC = 'https://i.postimg.cc/XYwvXN8D/img-4.png';
+const DEPTHMAP_SRC   = 'https://i.postimg.cc/2SHKQh2q/raw-4.webp';
 
-// Entry point
+// ---------------------------------------------------------------
+// Entry point — only runs on the Forge intro overlay, so the
+// scan CANNOT leak onto any other page (no overlay, no boot).
+// ---------------------------------------------------------------
 const overlay = document.getElementById('introOverlay');
 if (overlay) {
   boot(overlay).catch((err) => {
@@ -63,18 +66,8 @@ async function boot(root) {
   const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 10);
   camera.position.z = 1;
 
-  // ---- load photo + synthesize depth map ----
-  const loader = new THREE.TextureLoader();
-  loader.crossOrigin = 'anonymous';
-
-  const rawMap = await loadTexture(loader, TEXTURE_URL);
-  rawMap.colorSpace = THREE.SRGBColorSpace;
-  rawMap.minFilter = THREE.LinearFilter;
-  rawMap.magFilter = THREE.LinearFilter;
-  rawMap.wrapS = THREE.ClampToEdgeWrapping;
-  rawMap.wrapT = THREE.ClampToEdgeWrapping;
-
-  const depthMap = await synthesizeDepthMap(TEXTURE_URL);
+  // ---- load textures (or fall back to procedural) ----
+  const { rawMap, depthMap, imgW, imgH } = await loadTexturePair();
 
   // ---- shader material ----
   const uniforms = {
@@ -99,27 +92,21 @@ async function boot(root) {
   const plane = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material);
   scene.add(plane);
 
-  // ---- sizing ----
+  // ---- sizing — cover-fit the data-center image onto the viewport ----
   function resize() {
     const { w, h } = sizeOf();
     renderer.setSize(w, h, false);
     uniforms.uAspect.value = w / h;
 
-    // Fit the plane as "cover" — image fills viewport, overflow cropped.
-    const imgW = rawMap.image ? rawMap.image.width  : 1920;
-    const imgH = rawMap.image ? rawMap.image.height : 1080;
     const imgAspect  = imgW / imgH;
     const viewAspect = w / h;
 
     let sx = 1, sy = 1;
     if (viewAspect > imgAspect) {
-      // viewport wider than image → scale by width, overflow vertically
       sy = (h / w) * imgAspect;
     } else {
-      // viewport taller than image → scale by height, overflow horizontally
       sx = (w / h) / imgAspect;
     }
-    // Keep slight underscan so edges don't sit hard against UI.
     const scale = 1.04;
     plane.scale.set(sx * scale, sy * scale, 1);
   }
@@ -138,19 +125,14 @@ async function boot(root) {
   const clock = new THREE.Clock();
   let disposed = false;
 
-  // Mark overlay so CSS can fade the canvas in gently
   root.dataset.canvasReady = 'true';
 
   function tick() {
     if (disposed) return;
     const t = clock.getElapsedTime();
-
-    // Red scan line + depth-flow band both sweep on the same cycle
-    // (~4 second period, matching the React source).
     uniforms.uTime.value = t;
+    // Scan + depth-flow share this cycle; matches the reference exactly.
     uniforms.uProgress.value = Math.sin(t * 0.5) * 0.5 + 0.5;
-
-    // Fade in over the first ~1.5 seconds.
     uniforms.uOpacity.value = Math.min(1, t / 1.5);
 
     try {
@@ -165,7 +147,7 @@ async function boot(root) {
   }
   requestAnimationFrame(tick);
 
-  // ---- cleanup on dismiss ----
+  // ---- cleanup ----
   const dispose = () => {
     disposed = true;
     window.removeEventListener('resize', resize);
@@ -181,96 +163,53 @@ async function boot(root) {
 }
 
 // ---------------------------------------------------------------
-// Shaders — straight port of the TSL graph from hero-futuristic
+// Texture pair loader — tries the reference pair first, falls
+// back to a procedural data-center canvas if the CDN is blocked.
 // ---------------------------------------------------------------
+async function loadTexturePair() {
+  try {
+    const loader = new THREE.TextureLoader();
+    loader.crossOrigin = 'anonymous';
+    const [rawMap, depthMap] = await Promise.all([
+      loadTexture(loader, TEXTUREMAP_SRC),
+      loadTexture(loader, DEPTHMAP_SRC),
+    ]);
 
-const VERT = /* glsl */ `
-  varying vec2 vUv;
-  void main() {
-    vUv = uv;
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    rawMap.colorSpace = THREE.SRGBColorSpace;
+    rawMap.minFilter = THREE.LinearFilter;
+    rawMap.magFilter = THREE.LinearFilter;
+    rawMap.wrapS = THREE.ClampToEdgeWrapping;
+    rawMap.wrapT = THREE.ClampToEdgeWrapping;
+
+    depthMap.minFilter = THREE.LinearFilter;
+    depthMap.magFilter = THREE.LinearFilter;
+    depthMap.wrapS = THREE.ClampToEdgeWrapping;
+    depthMap.wrapT = THREE.ClampToEdgeWrapping;
+
+    const imgW = rawMap.image ? rawMap.image.width  : 1920;
+    const imgH = rawMap.image ? rawMap.image.height : 1080;
+    return { rawMap, depthMap, imgW, imgH };
+  } catch (err) {
+    console.warn('[intro] reference texture load failed, using procedural fallback:', err);
+    const { color, depth } = drawPixelDataCenter();
+    const rawMap = new THREE.CanvasTexture(color);
+    rawMap.colorSpace = THREE.SRGBColorSpace;
+    rawMap.minFilter = THREE.NearestFilter;
+    rawMap.magFilter = THREE.NearestFilter;
+    rawMap.wrapS = THREE.ClampToEdgeWrapping;
+    rawMap.wrapT = THREE.ClampToEdgeWrapping;
+    rawMap.needsUpdate = true;
+
+    const depthMap = new THREE.CanvasTexture(depth);
+    depthMap.minFilter = THREE.LinearFilter;
+    depthMap.magFilter = THREE.LinearFilter;
+    depthMap.wrapS = THREE.ClampToEdgeWrapping;
+    depthMap.wrapT = THREE.ClampToEdgeWrapping;
+    depthMap.needsUpdate = true;
+
+    return { rawMap, depthMap, imgW: color.width, imgH: color.height };
   }
-`;
-
-const FRAG = /* glsl */ `
-  precision highp float;
-  varying vec2 vUv;
-
-  uniform sampler2D uMap;
-  uniform sampler2D uDepth;
-  uniform vec2  uPointer;
-  uniform float uProgress;
-  uniform float uTime;
-  uniform float uAspect;
-  uniform float uOpacity;
-
-  // Cheap hash-based "cell noise" — stands in for mx_cell_noise_float.
-  float hash12(vec2 p) {
-    vec3 p3 = fract(vec3(p.xyx) * 0.1031);
-    p3 += dot(p3, p3.yzx + 33.33);
-    return fract((p3.x + p3.y) * p3.z);
-  }
-  float cellNoise(vec2 p) {
-    vec2 i = floor(p);
-    return hash12(i);
-  }
-
-  // Port of 1 - (1-a)*(1-b) — "blend screen".
-  vec3 blendScreen(vec3 a, vec3 b) {
-    return 1.0 - (1.0 - a) * (1.0 - b);
-  }
-
-  void main() {
-    // 1. Depth-parallax sample of the photograph.
-    float depth = texture2D(uDepth, vUv).r;
-    float strength = 0.012;
-    vec2 parallaxUv = vUv + depth * uPointer * strength;
-    vec3 tMap = texture2D(uMap, parallaxUv).rgb;
-
-    // Boost the photograph a touch so the reds pop on darker server rooms.
-    tMap = pow(tMap, vec3(0.92)) * 1.08;
-
-    // 2. Red dot-flow mask (tiled dots * cell-noise * depth gate).
-    vec2 tUv = vec2(vUv.x * uAspect, vUv.y);
-    float tiling = 120.0;
-    vec2 tiledUv = mod(tUv * tiling, 2.0) - 1.0;
-    float brightness = cellNoise(tUv * tiling * 0.5);
-    float dist = length(tiledUv);
-    float dotShape = smoothstep(0.5, 0.49, dist) * brightness;
-
-    // A narrow band of dots that follows the current "progress" depth.
-    float flow = 1.0 - smoothstep(0.0, 0.02, abs(depth - uProgress));
-    vec3  mask = vec3(dotShape * flow * 10.0, 0.0, 0.0);
-
-    vec3 blended = blendScreen(tMap, mask);
-
-    // 3. Vertical red scan line — sweeps top↔bottom on the progress uniform.
-    float scanWidth = 0.05;
-    float scanLine  = smoothstep(0.0, scanWidth, abs(vUv.y - uProgress));
-    vec3  redOverlay = vec3(1.0, 0.08, 0.08) * (1.0 - scanLine) * 0.55;
-    vec3  withScan = mix(blended, blended + redOverlay,
-                         smoothstep(0.9, 1.0, 1.0 - scanLine));
-
-    // 4. Cheap bloom-like lift: take the bright channel and add back.
-    float lum = max(max(withScan.r, withScan.g), withScan.b);
-    vec3  bloomish = withScan * smoothstep(0.6, 1.1, lum) * 0.6;
-    vec3  finalCol = withScan + bloomish;
-
-    // 5. Vignette to keep focus centered.
-    float r = length(vUv - 0.5);
-    float vignette = smoothstep(0.95, 0.35, r);
-    finalCol *= (0.55 + 0.55 * vignette);
-
-    // 6. Cool colour grade toward the Augur mint palette.
-    finalCol = mix(finalCol, finalCol * vec3(0.78, 1.08, 1.05), 0.35);
-
-    gl_FragColor = vec4(finalCol, uOpacity);
-  }
-`;
-
-// ---------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------
+}
 
 function loadTexture(loader, url) {
   return new Promise((resolve, reject) => {
@@ -278,95 +217,137 @@ function loadTexture(loader, url) {
   });
 }
 
-/**
- * Synthesize a depth map from the source photograph.
- *
- * Runs in an offscreen canvas: converts the image to a grayscale
- * depth approximation using luminance + a vertical bias (floors
- * are "closer", ceilings "farther") + a gentle blur. The result
- * is a grayscale DataTexture used by the parallax shader.
- *
- * It's not a MiDaS-quality depth map, but it's "good enough" for
- * the subtle 0.012-strength parallax the shader uses, and it
- * keeps us from needing a second hosted asset.
- */
-async function synthesizeDepthMap(imageUrl) {
-  const img = await loadImage(imageUrl);
+// ---------------------------------------------------------------
+// Procedural pixel data center fallback — only used if the CDN
+// images fail. Kept so the scan always has a subject.
+// ---------------------------------------------------------------
+const CANVAS_W = 960;
+const CANVAS_H = 540;
+const PIXEL    = 4;
+const snap = (n) => Math.floor(n / PIXEL) * PIXEL;
 
-  // Downsample for speed — 512px long edge is plenty for a depth map.
-  const target = 512;
-  const aspect = img.width / img.height;
-  const w = aspect >= 1 ? target : Math.round(target * aspect);
-  const h = aspect >= 1 ? Math.round(target / aspect) : target;
+function drawPixelDataCenter() {
+  const color = document.createElement('canvas');
+  color.width = CANVAS_W; color.height = CANVAS_H;
+  const c = color.getContext('2d');
+  c.imageSmoothingEnabled = false;
 
-  const cnv = document.createElement('canvas');
-  cnv.width = w;
-  cnv.height = h;
-  const ctx = cnv.getContext('2d');
-  ctx.drawImage(img, 0, 0, w, h);
+  const depth = document.createElement('canvas');
+  depth.width = CANVAS_W; depth.height = CANVAS_H;
+  const d = depth.getContext('2d');
+  d.imageSmoothingEnabled = false;
 
-  const src = ctx.getImageData(0, 0, w, h);
-  const depth = new Uint8Array(w * h);
+  c.fillStyle = '#05070B'; c.fillRect(0, 0, CANVAS_W, CANVAS_H);
+  d.fillStyle = '#000';    d.fillRect(0, 0, CANVAS_W, CANVAS_H);
 
-  // Pass 1: luminance + vertical gradient → raw depth guess.
-  for (let y = 0; y < h; y++) {
-    const vy = y / (h - 1);
-    for (let x = 0; x < w; x++) {
-      const i = (y * w + x) * 4;
-      const r = src.data[i], g = src.data[i + 1], b = src.data[i + 2];
-      // Rec. 709 luminance
-      const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-      // Bright pixels → closer. Low rows → closer (floors).
-      const bias = (1.0 - vy) * 64.0;  // bottom of frame reads closer
-      const val = Math.min(255, Math.max(0, lum * 0.7 + bias));
-      depth[y * w + x] = val;
-    }
+  const VX = CANVAS_W / 2;
+  const VY = CANVAS_H * 0.47;
+
+  // Ceiling cable-tray slats
+  for (let i = 0; i < 14; i++) {
+    const t = i / 13;
+    const y = snap(VY * (1 - Math.pow(1 - t, 1.8)) * 0.92);
+    const a = 0.08 + 0.32 * (1 - t);
+    c.fillStyle = `rgba(40, 60, 85, ${a})`;
+    c.fillRect(0, y, CANVAS_W, PIXEL);
+  }
+  c.fillStyle = 'rgba(120, 245, 220, 0.30)';
+  c.fillRect(snap(VX - 90), snap(VY - 16), 180, PIXEL);
+  c.fillStyle = 'rgba(170, 255, 235, 0.60)';
+  c.fillRect(snap(VX - 28), snap(VY - 16), 56, PIXEL);
+
+  // Floor tile lines
+  for (let i = 0; i <= 16; i++) {
+    const t = i / 16;
+    const ease = Math.pow(t, 1.8);
+    const y = snap(VY + (CANVAS_H - VY) * ease);
+    const a = 0.10 + 0.42 * t;
+    c.strokeStyle = `rgba(60, 120, 135, ${a})`;
+    c.lineWidth = 1;
+    c.beginPath();
+    c.moveTo(0, y + 0.5);
+    c.lineTo(CANVAS_W, y + 0.5);
+    c.stroke();
+  }
+  for (let i = -11; i <= 11; i++) {
+    const xNear = snap(VX + i * (CANVAS_W * 0.055));
+    const grad = c.createLinearGradient(VX, VY, xNear, CANVAS_H);
+    grad.addColorStop(0, 'rgba(60, 120, 135, 0.04)');
+    grad.addColorStop(1, 'rgba(80, 180, 185, 0.42)');
+    c.strokeStyle = grad;
+    c.lineWidth = 1;
+    c.beginPath();
+    c.moveTo(VX, VY);
+    c.lineTo(xNear, CANVAS_H);
+    c.stroke();
   }
 
-  // Pass 2: cheap 3x box blur (horizontal then vertical) to smooth noise.
-  const tmp = new Uint8Array(depth.length);
-  blurPass(depth, tmp, w, h, true);
-  blurPass(tmp, depth, w, h, false);
-  blurPass(depth, tmp, w, h, true);
-  blurPass(tmp, depth, w, h, false);
+  // Back wall + doorway
+  const wallW = snap(136);
+  const wallH = snap(88);
+  c.fillStyle = '#12161E';
+  c.fillRect(snap(VX - wallW / 2), snap(VY - wallH / 2), wallW, wallH);
+  const doorGrad = c.createRadialGradient(VX, VY, 2, VX, VY, wallW / 2);
+  doorGrad.addColorStop(0.0, 'rgba(90, 255, 230, 0.90)');
+  doorGrad.addColorStop(0.5, 'rgba(51, 251, 211, 0.45)');
+  doorGrad.addColorStop(1.0, 'rgba(51, 251, 211, 0)');
+  c.fillStyle = doorGrad;
+  c.fillRect(snap(VX - wallW / 2), snap(VY - wallH / 2), wallW, wallH);
+  c.fillStyle = 'rgba(180, 255, 240, 0.60)';
+  c.fillRect(snap(VX - 2), snap(VY - wallH / 2 + 8), PIXEL, snap(wallH - 16));
 
-  // Pack as R channel of an RGBA texture (three.js supports that everywhere).
-  const rgba = new Uint8Array(w * h * 4);
-  for (let i = 0, j = 0; i < depth.length; i++, j += 4) {
-    const v = depth[i];
-    rgba[j] = v; rgba[j + 1] = v; rgba[j + 2] = v; rgba[j + 3] = 255;
-  }
+  const rand = (seed) => {
+    const s = Math.sin(seed * 12.9898) * 43758.5453;
+    return s - Math.floor(s);
+  };
 
-  const tex = new THREE.DataTexture(rgba, w, h, THREE.RGBAFormat);
-  tex.minFilter = THREE.LinearFilter;
-  tex.magFilter = THREE.LinearFilter;
-  tex.wrapS = THREE.ClampToEdgeWrapping;
-  tex.wrapT = THREE.ClampToEdgeWrapping;
-  tex.needsUpdate = true;
-  return tex;
-}
+  const RACK_COUNT = 10;
+  const drawRow = (side) => {
+    for (let i = RACK_COUNT - 1; i >= 0; i--) {
+      const t = (i + 1) / RACK_COUNT;
+      const ease = Math.pow(t, 1.55);
+      const aisleHalf = 22;
+      const farX  = side * aisleHalf;
+      const nearX = side * CANVAS_W * 0.50;
+      const cx = VX + farX + (nearX - farX) * ease;
 
-function blurPass(inArr, outArr, w, h, horizontal) {
-  for (let y = 0; y < h; y++) {
-    for (let x = 0; x < w; x++) {
-      let sum = 0, n = 0;
-      for (let k = -2; k <= 2; k++) {
-        const xx = horizontal ? Math.min(w - 1, Math.max(0, x + k)) : x;
-        const yy = horizontal ? y : Math.min(h - 1, Math.max(0, y + k));
-        sum += inArr[yy * w + xx];
-        n++;
-      }
-      outArr[y * w + x] = sum / n;
-    }
-  }
-}
+      const rackH = snap(48 + 330 * ease);
+      const rackW = snap(20 + 150 * ease);
+      const rackX = snap(cx - rackW / 2);
+      const rackY = snap(VY - rackH * 0.34);
 
-function loadImage(url) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.onload  = () => resolve(img);
-    img.onerror = reject;
-    img.src = url;
-  });
-}
+      const depthVal = Math.floor(30 + 210 * ease);
+      d.fillStyle = `rgb(${depthVal},${depthVal},${depthVal})`;
+      d.fillRect(rackX, rackY, rackW, rackH);
+
+      c.fillStyle = '#0A1420';
+      c.fillRect(rackX, rackY, rackW, rackH);
+      c.fillStyle = '#1B2A3C';
+      c.fillRect(rackX, rackY, PIXEL, rackH);
+      c.fillRect(rackX + rackW - PIXEL, rackY, PIXEL, rackH);
+      c.fillStyle = '#03060C';
+      c.fillRect(rackX, rackY, rackW, PIXEL * 2);
+      c.fillRect(rackX, rackY + rackH - PIXEL * 2, rackW, PIXEL * 2);
+
+      const unitH = Math.max(PIXEL * 2, snap(rackH / 22));
+      const units = Math.floor((rackH - PIXEL * 6) / unitH);
+      const innerX = rackX + PIXEL * 2;
+      const innerW = rackW - PIXEL * 4;
+
+      for (let u = 0; u < units; u++) {
+        const uy = rackY + PIXEL * 3 + u * unitH;
+        c.fillStyle = u % 3 === 0 ? '#0F1C2A' : '#0B1624';
+        c.fillRect(innerX, uy, innerW, Math.max(PIXEL, unitH - PIXEL));
+        if (unitH >= PIXEL * 3) {
+          c.fillStyle = 'rgba(0,0,0,0.35)';
+          c.fillRect(innerX, uy + unitH - PIXEL, innerW, 1);
+        }
+        if (unitH < PIXEL * 3 || innerW < PIXEL * 6) continue;
+
+        const r = rand(i * 53 + u * 17 + (side === 1 ? 7 : 29));
+        const ledColor =
+          r < 0.55 ? '#33FBD3'
+          : r < 0.80 ? '#7BFF9E'
+          : r < 0.93 ? '#6DD6FF'
+          : '#FF6B7A';
+        const ledGlow

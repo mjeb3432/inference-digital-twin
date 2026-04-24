@@ -450,7 +450,7 @@ export function HeroFuturistic({ onEnter }: { onEnter?: () => void }) {
       <div className="h-svh uppercase items-center w-full absolute z-[60] pointer-events-none px-10 flex justify-center flex-col">
         <p className="font-mono text-[11px] md:text-xs tracking-[0.42em] text-white/60 mb-6">
           <span className="inline-block w-2.5 h-2.5 rounded-full bg-forge-accent mr-3 align-middle shadow-[0_0_12px_rgba(51,251,211,0.85)] animate-pulse" />
-          INFERENCE INFRASTRUCTURE DIGITAL TWIN · SIMPLY SILICON
+          INFERENCE INFRASTRUCTURE DIGITAL TWIN
         </p>
 
         <div className="font-display text-6xl md:text-8xl xl:text-9xl 2xl:text-[10rem] font-bold leading-[0.92] tracking-tight">
