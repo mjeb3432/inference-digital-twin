@@ -14,7 +14,7 @@ type LogRow = {
 };
 
 const SEED: LogRow[] = [
-  { id: '1', timestamp: '14:02:11', level: 'ok',   message: 'PHASE 1 · SITE SELECTION confirmed',  detail: '12MW CDHI-01 · Calgary, AB · permit #A-2026-0481' },
+  { id: '1', timestamp: '14:02:11', level: 'ok',   message: 'PHASE 1 · SITE SELECTION confirmed',  detail: '12MW FACILITY-01 · permit #A-2026-0481' },
   { id: '2', timestamp: '14:02:42', level: 'info', message: 'Switchgear option A selected',        detail: '2N topology, 4x2.5MVA transformers, medium voltage' },
   { id: '3', timestamp: '14:03:07', level: 'warn', message: 'Cooling spec exceeds budget envelope', detail: 'Hybrid liquid + air adds +$4.2M CAPEX. Accept?' },
 ];
