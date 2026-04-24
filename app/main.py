@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import AsyncIterator
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -27,6 +28,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             services.shutdown()
 
     app = FastAPI(title="Inference Digital Twin", version="0.1.0", lifespan=lifespan)
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:3000"],
+        allow_methods=["GET", "POST"],
+        allow_headers=["*"],
+    )
 
     app.state.settings = settings
     app.state.services = services
