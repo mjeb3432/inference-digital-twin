@@ -300,7 +300,7 @@
   const SCHEMA_VERSION = "2.0.0";
 
   // Cost basis references (captured March 28, 2026):
-  // - Flight Deck model formulas: Inputs! rows 240-330 in "Flight Deck Simply Silicon Foundation Model vComplete.xlsx"
+  // - Flight Deck model formulas: Inputs! rows 240-330 in the Watt-Bit Foundation Model workbook
   // - EIA utility-scale generator costs (2023): https://www.eia.gov/electricity/annual/table.php?t=epa_08_04
   // - EIA commercial electricity price (2024): https://www.eia.gov/electricity/sales_revenue_price/pdf/table_13.pdf
   // - JLL Data Center Outlook 2026 construction per MW: https://www.jll.com/en-us/insights/data-centers-and-ai-infrastructure-report
