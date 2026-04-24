@@ -5,6 +5,9 @@
    Hybrid of Mission Control (A) + Isometric War Room (B).
    ============================================================ */
 
+/* Ensure hidden attribute works across all view-tab containers */
+[hidden] { display: none !important; }
+
 /* ── Augur VC Design Tokens ────────────────────────────────── */
 body.explorer-page {
   --bg:           #08090B;

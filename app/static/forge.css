@@ -259,8 +259,8 @@ input[type="number"], select,
 }
 
 .phase-timeline li.complete {
-  border-color: var(--border);
-  background: rgba(74, 222, 128, 0.05);
+  border-color: rgba(74, 222, 128, 0.35);
+  background: rgba(74, 222, 128, 0.08);
   color: var(--dim);
 }
 
@@ -269,7 +269,7 @@ input[type="number"], select,
   color: var(--healthy);
 }
 
-.phase-timeline li.locked { opacity: 0.38; }
+.phase-timeline li.locked { opacity: 0.5; }
 
 /* ─── Decision panel ─────────────────────────────────────────────────── */
 .decision-panel { display: grid; gap: 8px; }
