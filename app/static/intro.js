@@ -261,8 +261,8 @@ const FRAG = /* glsl */ `
     float vignette = smoothstep(0.95, 0.35, r);
     finalCol *= (0.55 + 0.55 * vignette);
 
-    // 6. Warm color grade toward the Forge amber palette.
-    finalCol = mix(finalCol, finalCol * vec3(1.08, 0.96, 0.82), 0.35);
+    // 6. Cool colour grade toward the Augur mint palette.
+    finalCol = mix(finalCol, finalCol * vec3(0.78, 1.08, 1.05), 0.35);
 
     gl_FragColor = vec4(finalCol, uOpacity);
   }

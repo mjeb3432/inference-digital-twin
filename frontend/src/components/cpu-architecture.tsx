@@ -12,7 +12,7 @@ export function CpuArchitecture() {
       <rect
         x="120" y="90" width="360" height="180"
         fill="none"
-        stroke="#F5A623"
+        stroke="#33FBD3"
         strokeWidth="1.5"
         rx="6"
       />
@@ -22,7 +22,7 @@ export function CpuArchitecture() {
         fontFamily="IBM Plex Mono, monospace"
         fontSize="11"
         letterSpacing="0.24em"
-        fill="#F5A623"
+        fill="#33FBD3"
         opacity="0.75"
       >
         CPU · GPU · INTERCONNECT

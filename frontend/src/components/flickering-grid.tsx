@@ -32,7 +32,7 @@ export function FlickeringGrid() {
         for (let x = 0; x < width; x += cell) {
           const flicker = Math.random() > 0.985;
           ctx.fillStyle = flicker
-            ? 'rgba(245, 166, 35, 0.55)'
+            ? 'rgba(51, 251, 211, 0.55)'
             : 'rgba(255, 255, 255, 0.03)';
           ctx.fillRect(x, y, 1, 1);
         }

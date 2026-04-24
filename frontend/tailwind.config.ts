@@ -1,6 +1,6 @@
 import type { Config } from 'tailwindcss';
 
-// Design tokens lifted from DESIGN.md + the Forge amber/teal palette.
+// Design tokens lifted from augurvc.com — mint/aqua primary on deep navy-black.
 // Kept CSS-variable-driven so shadcn components pick up the theme.
 const config: Config = {
   darkMode: ['class'],
@@ -21,17 +21,26 @@ const config: Config = {
         mono:    ['"IBM Plex Mono"', '"JetBrains Mono"', 'ui-monospace', 'monospace'],
       },
       colors: {
-        // Forge palette
+        // Augur VC palette (pulled from augurvc.com)
         forge: {
-          bg:      '#08090B',
-          panel:   '#0E1116',
-          line:    '#1C2128',
-          amber:   '#F5A623',
-          teal:    '#14B8A6',
-          cyan:    '#22D3EE',
-          nominal: '#4ADE80',
-          warn:    '#F59E0B',
-          crit:    '#EF4444',
+          bg:        '#05070B',   // --bg
+          'bg-deep': '#020309',   // --bg-deep
+          panel:     '#0B1220',   // --bg-highlight
+          line:      '#1A2436',   // slightly lighter panel line
+          // Primary accents
+          accent:    '#33FBD3',   // --accent  (mint / aqua)
+          lime:      '#7BFF9E',   // --accent-2
+          sky:       '#6DD6FF',   // --accent-3
+          // Back-compat: keep `amber` alias but point it at the brand mint so
+          // any stray `bg-forge-amber` class lights up in brand colour.
+          amber:     '#33FBD3',
+          teal:      '#33FBD3',
+          cyan:      '#6DD6FF',
+          nominal:   '#7BFF9E',
+          warn:      '#FFC478',
+          crit:      '#FF6B7A',
+          text:      '#F2F7FF',
+          muted:     '#A5B5C9',
         },
         // shadcn tokens (CSS vars set in index.css)
         border: 'hsl(var(--border))',
