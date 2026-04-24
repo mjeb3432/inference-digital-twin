@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/main.tsx","./src/components/cpu-architecture.tsx","./src/components/flickering-grid.tsx","./src/components/forge-shell.tsx","./src/components/hero-futuristic.tsx","./src/components/interactive-logs-table.tsx","./src/components/spline-scene.tsx","./src/lib/utils.ts"],"errors":true,"version":"5.9.3"}

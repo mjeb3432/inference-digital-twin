@@ -66,14 +66,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             },
         )
 
+    # ----------------------------------------------------------------
+    # /forge  — serves the React/Vite SPA from frontend/dist when
+    # present, falls back to the legacy Jinja template otherwise.
+    # ----------------------------------------------------------------
+    spa_index = static_dir / "dist" / "index.html"
+
     @app.get("/forge", response_class=HTMLResponse)
     def forge(request: Request) -> HTMLResponse:
+        # Preferred path: the Vite build output has been produced.
+        if spa_index.is_file():
+            return HTMLResponse(spa_index.read_text(encoding="utf-8"))
+        # Fallback: legacy vanilla-JS template (keeps the app usable
+        # before the first `npm run build`).
         return templates.TemplateResponse(
             request,
             "forge.html",
-            {
-                "title": "The Forge",
-            },
+            {"title": "The Forge"},
         )
 
     @app.get("/runs/{run_id}", response_class=HTMLResponse)

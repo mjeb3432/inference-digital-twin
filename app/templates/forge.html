@@ -8,8 +8,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=IBM+Plex+Mono:wght@400;500&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/intro.css?v=20260424a" />
-  <link rel="stylesheet" href="/static/forge.css?v=20260423d" />
+  <link rel="stylesheet" href="/static/intro.css?v=20260423c" />
+  <link rel="stylesheet" href="/static/forge.css?v=20260417b" />
 </head>
 <body class="forge-page">
 
@@ -27,15 +27,13 @@
       <div class="intro-glow intro-glow-cyan"></div>
       <div class="intro-scan-css"></div>
       <div class="intro-vignette"></div>
-      <!-- HUD corner brackets on a flat layer (not inside the rotated grid) -->
-      <div class="intro-hud-corners" aria-hidden="true"></div>
     </div>
 
     <!-- Canvas for JS enhancement (used if three.js loads successfully) -->
     <canvas class="intro-canvas" aria-hidden="true"></canvas>
 
     <div class="intro-text">
-      <p class="intro-kicker">INFERENCE INFRASTRUCTURE DIGITAL TWIN &middot; WATT-BIT INTELLIGENCE</p>
+      <p class="intro-kicker">INFERENCE INFRASTRUCTURE DIGITAL TWIN &middot; SIMPLY SILICON</p>
       <h1 class="intro-title">
         <span class="word">THE</span>
         <span class="word">FORGE</span>
@@ -48,7 +46,7 @@
     <div class="intro-meta" aria-hidden="true">
       <span>&#9670; INGEST // CDHI-01</span>
       <span>SCANNING FACILITY GEOMETRY</span>
-      <span>WATT-BIT INTELLIGENCE</span>
+      <span>CALGARY, AB</span>
     </div>
 
     <button class="intro-skip" type="button" aria-label="Skip intro">[ SKIP ]</button>
@@ -68,6 +66,7 @@
       var overlay = document.getElementById('introOverlay');
       if (!overlay) return;
 
+      var AUTO_DISMISS_MS = 6500;
       var mountedAt = Date.now();
       var dismissed = false;
 
@@ -108,6 +107,7 @@
         dismiss();
       });
 
+      setTimeout(dismiss, AUTO_DISMISS_MS);
     })();
   </script>
 
@@ -120,7 +120,7 @@
     }
   </script>
 
-  <script type="module" src="/static/intro.js?v=20260424a"></script>
+  <script type="module" src="/static/intro.js?v=20260423c"></script>
   <script src="/static/forge.js?v=20260417b" defer></script>
 
   <div class="desktop-banner" role="status">BEST VIEWED ON DESKTOP (1024PX+)</div>

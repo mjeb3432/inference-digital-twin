@@ -459,23 +459,23 @@ input[type="number"], select,
 
 .canvas-header {
   border-bottom: 1px solid var(--border);
-  padding: 10px 14px;
+  padding: 14px 16px 12px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0)),
+    linear-gradient(90deg, rgba(0, 229, 255, 0.06), rgba(0, 0, 0, 0));
 }
 
 .canvas-header .kicker { margin-bottom: 2px; }
 
 .canvas-header h2 {
-  margin: 0;
-  font-family: var(--font-display);
-  font-size: 1.1rem;
-  font-weight: 600;
-  letter-spacing: -0.01em;
+  margin: 4px 0 0;
+  font-size: 0.78rem;
   text-transform: uppercase;
-  color: var(--text);
+  letter-spacing: 0.14em;
 }
 
 .canvas-actions { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
@@ -515,12 +515,78 @@ input[type="number"], select,
     0deg,
     transparent,
     transparent 3px,
-    rgba(0, 0, 0, 0.06) 3px,
-    rgba(0, 0, 0, 0.06) 4px
+    rgba(0, 0, 0, 0.045) 3px,
+    rgba(0, 0, 0, 0.045) 4px
   );
 }
 
 .canvas-shell { position: absolute; inset: 0; z-index: 1; }
+
+.canvas-phase-brief {
+  position: absolute;
+  left: 18px;
+  top: 58px;
+  z-index: 7;
+  width: min(430px, calc(100% - 36px));
+  border: 1px solid rgba(91, 192, 222, 0.3);
+  background: linear-gradient(180deg, rgba(7, 16, 28, 0.94), rgba(5, 11, 20, 0.9));
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(4px);
+  padding: 16px 18px;
+}
+
+.phase-brief-kicker {
+  margin: 0 0 8px;
+  color: var(--accent);
+  font-size: 0.56rem;
+  text-transform: uppercase;
+}
+
+.canvas-phase-brief h3 {
+  margin: 0 0 8px;
+  font-size: 0.92rem;
+  line-height: 1.35;
+  text-transform: uppercase;
+}
+
+.phase-brief-body,
+.phase-brief-next {
+  margin: 0;
+  color: #bfd4ea;
+  font-size: 0.58rem;
+  line-height: 1.7;
+}
+
+.phase-brief-next {
+  color: var(--accent);
+  margin-top: 10px;
+}
+
+.phase-brief-stats {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.phase-brief-stat {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.02);
+  padding: 8px;
+  display: grid;
+  gap: 5px;
+}
+
+.phase-brief-stat span {
+  color: var(--dim);
+  font-size: 0.5rem;
+  text-transform: uppercase;
+}
+
+.phase-brief-stat strong {
+  font-size: 0.6rem;
+  color: var(--text);
+}
 
 .canvas-boot-shell {
   display: grid;
@@ -984,6 +1050,224 @@ input[type="number"]:focus {
   font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.cad-room-label {
+  fill: #3f454b;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.cad-small {
+  fill: #555555;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.cad-grid-tag {
+  fill: #6e7378;
+  font-size: 8px;
+}
+
+.cad-rack-meta {
+  fill: #5e676f;
+  font-size: 7px;
+}
+
+.cad-rack-count {
+  fill: #4a5158;
+  font-size: 10px;
+}
+
+.cad-dim-ext,
+.cad-dim-line {
+  stroke: #555555;
+  stroke-width: 0.75;
+  fill: none;
+}
+
+.cad-dim-text {
+  fill: #555555;
+  font-size: 10px;
+}
+
+.cad-metadata-bg,
+.cad-legend-bg {
+  fill: rgba(250, 251, 248, 0.86);
+  stroke: #aeb4bb;
+  stroke-width: 1;
+}
+
+.cad-meta-line {
+  fill: #4d535a;
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.cad-status-tag {
+  fill: #2d6bbd;
+  font-size: 9px;
+  text-transform: uppercase;
+}
+
+.cad-sensor {
+  fill: #5f7ea3;
+  stroke: #354d6a;
+  stroke-width: 0.8;
+}
+
+.cad-meter {
+  fill: #71849a;
+  stroke: #3d5068;
+  stroke-width: 0.8;
+}
+
+.cad-network-tap {
+  fill: #88a0be;
+  stroke: #4f6580;
+  stroke-width: 0.8;
+}
+
+.cad-pop {
+  fill: #e4a85f;
+  stroke: #9f6b2e;
+  stroke-width: 1;
+}
+
+.cad-solar-pad {
+  fill: rgba(30, 103, 136, 0.35);
+  stroke: #5c90a8;
+  stroke-width: 1;
+}
+
+.cad-solar-frame {
+  stroke: #9fd4ff;
+  stroke-width: 0.8;
+}
+
+.cad-wind-ppa,
+.cad-wind-mast,
+.cad-wind-blade {
+  fill: none;
+  stroke: #9aaec1;
+  stroke-width: 1.1;
+}
+
+.cad-wind-hub {
+  fill: #cfe1ee;
+  stroke: #7c92a7;
+  stroke-width: 0.8;
+}
+
+.cad-reactor-shell {
+  fill: rgba(82, 94, 122, 0.28);
+  stroke: #99a8c4;
+  stroke-width: 1.1;
+}
+
+.cad-reactor-stack {
+  fill: #aab6cb;
+  stroke: #8793a7;
+  stroke-width: 0.8;
+}
+
+.cad-human {
+  fill: none;
+  stroke: #5b626a;
+  stroke-width: 1;
+}
+
+.cad-vehicle {
+  fill: #b6bcc4;
+  stroke: #768089;
+  stroke-width: 1;
+}
+
+.draw-stroke {
+  stroke-dasharray: 2200;
+  stroke-dashoffset: 2200;
+  animation: cadStrokeDraw 0.8s ease forwards;
+}
+
+.draw-fill {
+  opacity: 0;
+  animation: cadFillIn 0.4s ease 0.4s forwards;
+}
+
+.draw-label {
+  opacity: 0;
+  animation: cadLabelIn 0.35s ease 0.75s forwards;
+}
+
+@keyframes ledPulse {
+  0% { opacity: 1; }
+  50% { opacity: 0.3; }
+  100% { opacity: 1; }
+}
+
+@keyframes fenceDraw {
+  to { stroke-dashoffset: 0; }
+}
+
+@keyframes roadDraw {
+  to { stroke-dashoffset: 0; }
+}
+
+@keyframes dashMove {
+  to { stroke-dashoffset: -18; }
+}
+
+@keyframes rackIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes rackFlash {
+  0% { filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.9)); }
+  100% { filter: drop-shadow(0 0 8px rgba(0, 229, 255, 0)); }
+}
+
+@keyframes rubinPulse {
+  0% { opacity: 1; }
+  50% { opacity: 0.35; }
+  100% { opacity: 1; }
+}
+
+@keyframes cityPulse {
+  0% { r: 3; opacity: 0.7; }
+  50% { r: 7; opacity: 1; }
+  100% { r: 3; opacity: 0.7; }
+}
+
+@keyframes dcPulse {
+  0% { opacity: 0.6; }
+  50% { opacity: 1; }
+  100% { opacity: 0.6; }
+}
+
+@keyframes mapZoomIn {
+  0% { transform: scale(2.2); opacity: 0.4; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+@keyframes mapZoomOut {
+  0% { transform: scale(0.8); opacity: 0.4; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+@keyframes cadStrokeDraw {
+  to { stroke-dashoffset: 0; }
+}
+
+@keyframes cadFillIn {
+  to { opacity: 1; }
+}
+
+@keyframes cadLabelIn {
+  to { opacity: 1; }
 }
 
 /* ─── Canvas SVG elements (structural — do not remove) ───────────────── */
@@ -1149,10 +1433,32 @@ input[type="number"]:focus {
 }
 
 @media (max-width: 1230px) {
-  body { overflow: auto; }
-  .forge-root { height: auto; min-height: 100vh; grid-template-columns: 1fr; grid-template-rows: auto auto auto; }
-  .decision-panel { max-height: none; }
-  .forge-center { min-height: 860px; }
+  body {
+    overflow: auto;
+  }
+
+  .forge-root {
+    height: auto;
+    min-height: 100vh;
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto auto;
+  }
+
+  .decision-panel {
+    max-height: none;
+  }
+
+  .forge-center {
+    min-height: 860px;
+  }
+
+  .canvas-phase-brief {
+    position: relative;
+    left: auto;
+    top: auto;
+    margin: 14px 14px 0;
+    width: auto;
+  }
 }
 
 @media (max-width: 1023px) {

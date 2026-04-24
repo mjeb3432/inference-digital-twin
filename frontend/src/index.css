@@ -1,0 +1,103 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================
+   Design tokens — CSS variables so shadcn picks up the theme.
+   HSL triplets because shadcn styles expect `hsl(var(--name))`.
+   ============================================================ */
+@layer base {
+  :root {
+    /* Augur VC palette — pulled from augurvc.com */
+    --background:             220 30% 4%;    /* #05070B */
+    --foreground:             213 67% 97%;   /* #F2F7FF */
+
+    --card:                   220 48% 8%;    /* #0B1220 */
+    --card-foreground:        213 67% 97%;
+
+    --popover:                220 48% 8%;
+    --popover-foreground:     213 67% 97%;
+
+    --primary:                168 96% 59%;   /* #33FBD3 mint/aqua */
+    --primary-foreground:     220 60% 5%;    /* dark navy on mint */
+
+    --secondary:              218 34% 12%;
+    --secondary-foreground:   213 67% 97%;
+
+    --muted:                  218 22% 18%;
+    --muted-foreground:       213 20% 72%;   /* #A5B5C9 */
+
+    --accent:                 135 100% 74%;  /* #7BFF9E lime */
+    --accent-foreground:      220 60% 5%;
+
+    --destructive:            354 100% 71%;  /* #FF6B7A */
+    --destructive-foreground: 213 67% 97%;
+
+    --border:                 215 30% 16%;
+    --input:                  215 30% 16%;
+    --ring:                   168 96% 59%;
+
+    --radius: 0.5rem;
+  }
+
+  html, body, #root {
+    height: 100%;
+  }
+
+  body {
+    background: #05070B;
+    color: #F2F7FF;
+  }
+
+  /* Smooth, disciplined scrollbars — no shiny Mac translucence */
+  ::-webkit-scrollbar         { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-track   { background: #0B1220; }
+  ::-webkit-scrollbar-thumb   { background: #1A2436; border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: #273449; }
+}
+
+/* ============================================================
+   Animations borrowed from hero-futuristic reference
+   ============================================================ */
+@layer utilities {
+  .fade-in           { animation: fade-in 0.55s ease-out forwards; }
+  .fade-in-subtitle  { animation: fade-in-subtitle 0.9s ease-out forwards; }
+
+  /* "Scroll to explore" CTA from hero-futuristic demo */
+  .explore-btn {
+    position: absolute;
+    left: 50%;
+    bottom: 46px;
+    transform: translateX(-50%);
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 24px;
+    font-family: "Plus Jakarta Sans", sans-serif;
+    font-weight: 600;
+    font-size: 13px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: white;
+    background: rgba(51, 251, 211, 0.08);
+    border: 1px solid rgba(51, 251, 211, 0.6);
+    backdrop-filter: blur(6px);
+    cursor: pointer;
+    opacity: 0;
+    animation: fade-in 0.9s ease-out forwards;
+    transition: transform 160ms ease, background 160ms ease, border-color 160ms ease;
+    z-index: 61;
+  }
+  .explore-btn:hover {
+    background: rgba(51, 251, 211, 0.22);
+    border-color: rgba(51, 251, 211, 1);
+    transform: translateX(-50%) translateY(-1px);
+  }
+  .explore-arrow { display: inline-flex; }
+  .arrow-svg     { transform: translateY(1px); animation: arrow-drift 1.6s ease-in-out infinite; }
+
+  @keyframes arrow-drift {
+    0%, 100% { transform: translateY(1px); }
+    50%      { transform: translateY(4px); }
+  }
+}

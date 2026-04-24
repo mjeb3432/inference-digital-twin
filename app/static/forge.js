@@ -12,6 +12,44 @@
     "FACILITY COMPLETE",
   ];
 
+  const PHASE_BRIEFS = Object.freeze({
+    1: {
+      title: "Start with the site envelope.",
+      body: "Land, city, workload, and permitting decide how much datacenter you can realistically build before any equipment is specified.",
+      next: "Next lock: secure a firm power backbone.",
+    },
+    2: {
+      title: "Secure firm power before sizing the shell.",
+      body: "Grid, gas, and SMR are treated as 24/7 firm supply. Solar and wind act as lower-cost energy overlays and need matching firm backing.",
+      next: "Next lock: land the carrier entrances and MMR path.",
+    },
+    3: {
+      title: "Bring carriers to the site edge.",
+      body: "The fiber entry model and carrier set determine resiliency and latency before the building interior is finalized.",
+      next: "Next lock: turn the power plan into a buildable shell.",
+    },
+    4: {
+      title: "Convert procured MW into a buildable plant.",
+      body: "Developer type, cooling, and electrical architecture decide how much of the purchased facility load turns into usable IT load.",
+      next: "Next lock: fit the compute stack inside the real rack envelope.",
+    },
+    5: {
+      title: "Install compute only after density is real.",
+      body: "GPU generation, rack density, and serving stack must fit the cooling and power architecture chosen upstream.",
+      next: "Next lock: scale out the cluster fabric.",
+    },
+    6: {
+      title: "Wire the scale-out fabric around the cluster.",
+      body: "Node count, intra-node fabric, and external bandwidth determine whether the build actually scales or just gets larger.",
+      next: "Next lock: operationalize the facility with DCIM and maintenance.",
+    },
+    7: {
+      title: "Operationalize before calling it complete.",
+      body: "Monitoring, maintenance, and cooling telemetry decide whether the finished datacenter can actually be run with the uptime target it claims.",
+      next: "Next lock: benchmark and inspect the live facility.",
+    },
+  });
+
   const LOCATION = {
     rural: { label: "GREENFIELD RURAL", landPerAcre: 95000, permitMonths: [4, 10], nimby: "LOW", nimbyScore: 22, fiberMiles: 8, gridMiles: 5, geo: { lon: -93.62, lat: 42.03 } },
     urban: { label: "URBAN EDGE", landPerAcre: 420000, permitMonths: [6, 14], nimby: "HIGH", nimbyScore: 74, fiberMiles: 2, gridMiles: 3, geo: { lon: -77.47, lat: 39.04 } },
@@ -26,11 +64,11 @@
   };
 
   const POWER_SRC = {
-    fom: { label: "FRONT-OF-METER GRID", lead: "6-24 MO / 2-5 YR", capexKw: 250, rateMwh: 127.5 },
-    gas: { label: "NATURAL GAS GENSETS", lead: "2-5 YEARS", capexKw: 900, rateMwh: 98 },
-    solar: { label: "SOLAR + BESS", lead: "1-3 YEARS", capexKw: 1617, rateMwh: 61 },
-    wind: { label: "WIND", lead: "3-5 YEARS", capexKw: 1738, rateMwh: 66 },
-    smr: { label: "SMALL MODULAR REACTOR", lead: "POST-2027", capexKw: 5000, rateMwh: 91 },
+    fom: { label: "FRONT-OF-METER GRID", lead: "6-24 MO / 2-5 YR", capexKw: 250, rateMwh: 127.5, class: "FIRM UTILITY", delivery: "24/7 FIRM", onsite: false, renewable: false },
+    gas: { label: "NATURAL GAS GENSETS", lead: "2-5 YEARS", capexKw: 900, rateMwh: 98, class: "ONSITE DISPATCHABLE", delivery: "24/7 FIRM", onsite: true, renewable: false },
+    solar: { label: "SOLAR + BESS", lead: "1-3 YEARS", capexKw: 1617, rateMwh: 61, class: "VARIABLE OVERLAY", delivery: "VARIABLE / SHAPED", onsite: true, renewable: true },
+    wind: { label: "WIND PPA", lead: "3-5 YEARS", capexKw: 1738, rateMwh: 66, class: "VARIABLE OVERLAY", delivery: "VARIABLE / PPA", onsite: false, renewable: true },
+    smr: { label: "SMALL MODULAR REACTOR", lead: "POST-2027", capexKw: 5000, rateMwh: 91, class: "FUTURE BASELOAD", delivery: "24/7 FIRM", onsite: true, renewable: false, future: true },
   };
 
   const REDUNDANCY = {
@@ -1678,6 +1716,118 @@
     facilityState.power.sources[biggest] = clamp(facilityState.power.sources[biggest] + (100 - total), 0, 100);
   }
 
+  function computePowerPortfolio(sources) {
+    const firmPct = (sources.fom || 0) + (sources.gas || 0) + (sources.smr || 0);
+    const variablePct = (sources.solar || 0) + (sources.wind || 0);
+    const renewablePct = (sources.solar || 0) + (sources.wind || 0);
+    const onsitePct = (sources.gas || 0) + (sources.solar || 0) + (sources.smr || 0);
+    const entries = Object.entries(sources)
+      .map(([key, pct]) => ({ key, pct, src: POWER_SRC[key] }))
+      .filter(({ pct }) => pct > 0)
+      .sort((a, b) => b.pct - a.pct);
+    const primary = entries[0] || null;
+
+    return {
+      firmPct,
+      variablePct,
+      renewablePct,
+      onsitePct,
+      primaryKey: primary?.key || null,
+      primaryLabel: primary?.src?.label || "UNSET",
+      primaryLead: primary?.src?.lead || "UNSET",
+      firmingState: variablePct > firmPct ? "UNDER-BACKED" : "BACKED",
+      narrative: variablePct > firmPct
+        ? "VARIABLE ENERGY EXCEEDS THE FIRM BACKBONE."
+        : variablePct > 0
+          ? "VARIABLE ENERGY IS BACKED BY FIRM SUPPLY."
+          : "POWER PLAN IS FULLY FIRM.",
+    };
+  }
+
+  function phaseCanvasHeading(phase) {
+    return phase >= 1 && phase <= 7
+      ? `PHASE ${phase} — ${PHASES[phase - 1]}`
+      : "LIVE CONSTRUCTION VIEW";
+  }
+
+  function phaseStatusLabel(phase) {
+    if (phase === 8) return "FACILITY ONLINE";
+    return `PHASE ${phase} ACTIVE`;
+  }
+
+  function phaseStatsFor(phase) {
+    const power = ui.derived.powerPortfolio || computePowerPortfolio(facilityState.power.sources);
+    if (phase === 1) {
+      return [
+        ["SITE MAX", `${(ui.derived.siteMaxMw || 0).toFixed(1)} MW`],
+        ["CITY", ui.derived.cityLabel || "UNSET"],
+        ["WORKLOAD", ui.derived.workloadLabel || "UNSET"],
+      ];
+    }
+    if (phase === 2) {
+      return [
+        ["FIRM BACKING", `${power.firmPct.toFixed(0)}%`],
+        ["VARIABLE OVERLAY", `${power.variablePct.toFixed(0)}%`],
+        ["LEAD", ui.derived.powerLead || power.primaryLead || "UNSET"],
+      ];
+    }
+    if (phase === 3) {
+      return [
+        ["FIBER MODEL", FIBER_ACCESS[facilityState.fiber.accessType]?.label || "UNSET"],
+        ["CARRIERS", `${facilityState.fiber.carriers.length}/2+`],
+        ["IXP", ui.derived.ixpLabel || "UNSET"],
+      ];
+    }
+    if (phase === 4) {
+      return [
+        ["SHELL", DEVELOPER[facilityState.facility.developerType]?.label || "UNSET"],
+        ["COOLING", COOLING[facilityState.facility.coolingType]?.label || "UNSET"],
+        ["TARGET PUE", `${(facilityState.facility.pue || 2).toFixed(2)}`],
+      ];
+    }
+    if (phase === 5) {
+      return [
+        ["GPU", GPU[facilityState.compute.gpuModel]?.label || "UNSET"],
+        ["RACK KW", `${(ui.derived.rackKw || 0).toFixed(1)} KW`],
+        ["RACKS", INTEGER.format(facilityState.compute.rackCount || 0)],
+      ];
+    }
+    if (phase === 6) {
+      return [
+        ["FABRIC", FABRIC[facilityState.networking.fabric]?.label || "UNSET"],
+        ["NODES", INTEGER.format(facilityState.networking.nodeCount || 0)],
+        ["NETWORK RISK", ui.derived.networkRisk || "UNSET"],
+      ];
+    }
+    if (phase === 7) {
+      return [
+        ["MONITORING", MONITORING[facilityState.dcim.monitoringApproach]?.label || "UNSET"],
+        ["MAINTENANCE", MAINT[facilityState.dcim.maintenanceModel]?.label || "UNSET"],
+        ["UPTIME", `${(ui.derived.uptime || 0).toFixed(3)}%`],
+      ];
+    }
+    return [];
+  }
+
+  function renderPhaseBriefOverlay() {
+    if (facilityState.phase >= 8) return "";
+    const brief = PHASE_BRIEFS[facilityState.phase];
+    if (!brief) return "";
+    const stats = phaseStatsFor(facilityState.phase)
+      .map(([label, value]) => `<div class="phase-brief-stat"><span>${esc(label)}</span><strong>${esc(value)}</strong></div>`)
+      .join("");
+
+    return `
+      <div class="canvas-phase-brief">
+        <p class="phase-brief-kicker">PHASE ${facilityState.phase} OF 8</p>
+        <h3>${esc(brief.title)}</h3>
+        <p class="phase-brief-body">${esc(brief.body)}</p>
+        <div class="phase-brief-stats">${stats}</div>
+        <p class="phase-brief-next">${esc(brief.next)}</p>
+      </div>
+    `;
+  }
+
   function recalcAll() {
     enforceLocks();
     const errors = [];
@@ -1711,8 +1861,26 @@
 
     normalizePowerShares();
 
+    const powerPortfolio = computePowerPortfolio(facilityState.power.sources);
+
     if (powerTotal() !== 100) {
       errors.push(`POWER MIX MUST EQUAL 100% (CURRENT ${powerTotal()}%)`);
+    }
+
+    if (targetMw > 0 && powerPortfolio.firmPct <= 0) {
+      errors.push("POWER PLAN NEEDS AT LEAST ONE FIRM SOURCE (GRID, GAS, OR SMR).");
+    }
+    if (targetMw > 0 && powerPortfolio.variablePct > powerPortfolio.firmPct) {
+      errors.push("VARIABLE POWER SHARE EXCEEDS FIRM BACKING. KEEP GRID/GAS/SMR >= SOLAR+WIND FOR 24/7 LOAD.");
+    }
+    if (facilityState.site.utilityExpansionApproved && (facilityState.power.sources.fom || 0) === 0) {
+      warnings.push("UTILITY EXPANSION IS ENABLED BUT GRID SHARE IS 0%. TURN GRID ON OR DISABLE THE EXPANSION OVERRIDE.");
+    }
+    if ((facilityState.power.sources.smr || 0) > 0 && targetMw > 0 && targetMw < 250) {
+      warnings.push("SMR IS MODELED AS A LARGE-CAMPUS FUTURE OPTION. SUB-250 MW RESULTS ARE SPECULATIVE.");
+    }
+    if ((facilityState.power.sources.wind || 0) > 0) {
+      warnings.push("WIND IS MODELED AS AN OFFSITE PPA / ENERGY OFFSET, NOT AN ONSITE FIRM FEED.");
     }
 
     if (targetMw > siteMaxMw && !facilityState.site.utilityExpansionApproved) {
@@ -1734,6 +1902,9 @@
 
     powerCapex = powerCapex * (tier ? tier.mult : 1) + (ups ? targetKw * ups.kwCapex : 0);
     const gridStress = clamp((facilityState.power.sources.fom || 0) * 1.2 + (targetMw >= 250 ? 12 : 0), 0, 100);
+    const powerLead = powerPortfolio.primaryKey
+      ? `${POWER_SRC[powerPortfolio.primaryKey].label} / ${POWER_SRC[powerPortfolio.primaryKey].lead}`
+      : "UNSET";
 
     const access = FIBER_ACCESS[facilityState.fiber.accessType];
     const ixp = IXP[facilityState.fiber.ixpRegion];
@@ -2006,6 +2177,8 @@
       health,
       uptime,
       gridStress,
+      powerLead,
+      powerPortfolio,
       cityGeo: city ? city.geo : (loc ? loc.geo : LOCATION.rural.geo),
       cityLabel: city ? city.label : "UNSET",
       workloadLabel: workload ? workload.label : "UNSET",
@@ -2427,6 +2600,7 @@
   }
 
   function decisionPhase2() {
+    const power = ui.derived.powerPortfolio || computePowerPortfolio(facilityState.power.sources);
     const sourceSliders = Object.entries(POWER_SRC).map(([key, src]) => `
       <div class="slider-line" data-inspect-kind="power-source" data-inspect-key="${key}">
         <div class="top"><span>${src.label}</span><strong>${facilityState.power.sources[key].toFixed(1)}%</strong></div>
@@ -2459,12 +2633,13 @@
 
     return `
       <div class="decision-block">
-        <h3 class="decision-heading">DECISION 1 — POWER SOURCE MIX (TOTAL 100%) ${helpPopover("BLENDS GRID, ONSITE GENERATION, AND STORAGE. TOTAL MUST EQUAL 100% FOR PROCUREMENT MODELING.")}</h3>
+        <h3 class="decision-heading">DECISION 1 — POWER PROCUREMENT STACK (TOTAL 100%) ${helpPopover("GRID, GAS, AND SMR ARE MODELED AS FIRM 24/7 SOURCES. SOLAR AND WIND ACT AS VARIABLE ENERGY OVERLAYS AND MUST BE MATCHED BY FIRM BACKING.")}</h3>
         ${sourceSliders}
         ${powerTotal() !== 100 ? `<div class="warning-callout">POWER MIX MUST EQUAL 100%. CURRENT: ${powerTotal()}%</div>` : ""}
+        <div class="info-callout">FIRM BACKING: ${power.firmPct.toFixed(0)}% | VARIABLE OVERLAY: ${power.variablePct.toFixed(0)}% | ${power.narrative}</div>
       </div>
       <div class="decision-block">
-        <h3 class="decision-heading">DECISION 2 — TARGET MW CAPACITY ${helpPopover("SETS THE FACILITY POWER ENVELOPE. HIGHER MW INCREASES CAPEX, QUEUE TIME, AND BUILD COMPLEXITY.")}</h3>
+        <h3 class="decision-heading">DECISION 2 — TARGET MW CAPACITY ${helpPopover("SETS THE FACILITY POWER ENVELOPE. HIGHER MW INCREASES CAPEX, INTERCONNECT LEAD, AND BUILD COMPLEXITY.")}</h3>
         <select data-action="set-target-mw" data-inspect-kind="target-mw" data-inspect-key="value">
           <option value="">SELECT TARGET CAPACITY</option>
           ${TARGET_MW.map((mw) => {
@@ -2474,7 +2649,7 @@
           }).join("")}
         </select>
         <label class="inline-controls one"><span class="muted">ALLOW UTILITY/SITE EXPANSION</span><input type="checkbox" data-action="set-utility-expansion" ${facilityState.site.utilityExpansionApproved ? "checked" : ""} /></label>
-        <div class="info-callout">SITE MAX: ${siteMaxMw.toFixed(1)} MW | PROCURED: ${(facilityState.power.targetMW || 0).toFixed(1)} MW | POWER CAPEX: ${compactMoney(ui.derived.powerCapex || 0)} | QUEUE: ${ui.derived.interconnectQueue}</div>
+        <div class="info-callout">SITE MAX: ${siteMaxMw.toFixed(1)} MW | PROCURED: ${(facilityState.power.targetMW || 0).toFixed(1)} MW | POWER CAPEX: ${compactMoney(ui.derived.powerCapex || 0)} | LEAD: ${ui.derived.powerLead || "UNSET"}</div>
         ${overSite && !facilityState.site.utilityExpansionApproved ? `<div class="critical-callout">PROCURED MW EXCEEDS SITE MAX. ENABLE EXPANSION OR REDUCE TARGET.</div>` : ""}
       </div>
       <div class="decision-block">
@@ -2564,8 +2739,8 @@
 
     return `
       <div class="decision-block"><h3>DECISION 1 — DEVELOPER TYPE</h3><div class="option-grid">${devCards}</div></div>
-      <div class="decision-block"><h3>DECISION 3 — COOLING INFRASTRUCTURE</h3><div class="option-grid">${coolingCards}</div>${facilityState.facility.coolingType === "immersion" ? `<div class="warning-callout">IMMERSION MAY LIMIT COLLATERAL FINANCING.</div>` : ""}</div>
-      <div class="decision-block"><h3>DECISION 4 — POWER ARCHITECTURE</h3><div class="option-grid cols-3">${archCards}</div></div>
+      <div class="decision-block"><h3>DECISION 2 — COOLING INFRASTRUCTURE</h3><div class="option-grid">${coolingCards}</div>${facilityState.facility.coolingType === "immersion" ? `<div class="warning-callout">IMMERSION MAY LIMIT COLLATERAL FINANCING.</div>` : ""}</div>
+      <div class="decision-block"><h3>DECISION 3 — POWER ARCHITECTURE</h3><div class="option-grid cols-3">${archCards}</div></div>
     `;
   }
 
@@ -2710,8 +2885,11 @@
     }
     applyPhase8Immersive();
 
-    el.canvasTitle.textContent = mapMode ? "LIVE — GLOBAL MAP VIEW" : "LIVE CONSTRUCTION VIEW";
+    el.canvasTitle.textContent = mapMode ? "LIVE — GLOBAL MAP VIEW" : phaseCanvasHeading(facilityState.phase);
     el.siteStatusTag.style.visibility = facilityState.phase >= 1 && facilityState.site.locationType ? "visible" : "hidden";
+    if (el.siteStatusTag.style.visibility === "visible") {
+      el.siteStatusTag.innerHTML = `<span class="led live"></span>${esc(phaseStatusLabel(facilityState.phase))}`;
+    }
 
     el.viewToggleButton.hidden = !phase8;
     el.fullScreenToggleButton.hidden = !phase8;
@@ -2778,6 +2956,7 @@
       <div class="canvas-shell floor-cad ${stageClass}">
         ${renderFloorToolbar()}
         ${renderLayerPanel()}
+        ${renderPhaseBriefOverlay()}
         <svg id="forge-canvas" class="floor-svg-viewport" viewBox="0 0 ${FLOOR_VIEWBOX.w} ${FLOOR_VIEWBOX.h}" role="img" aria-label="Architectural floor plan">
           <defs>${renderCadDefs()}</defs>
           <rect class="cad-bg" x="0" y="0" width="${FLOOR_VIEWBOX.w}" height="${FLOOR_VIEWBOX.h}"></rect>
@@ -3296,6 +3475,40 @@
       return `<g data-inspect-kind="power-source" data-inspect-key="gas"><rect class="cad-concrete-pad ${drawFill}" x="${x}" y="${y}" width="40" height="24"></rect><text class="cad-small ${drawLabel}" x="${x + 20}" y="${y + 15}" text-anchor="middle">GEN-${i + 1}</text></g>`;
     }).join("");
 
+    const solarArrayCount = Math.max(0, Math.ceil((facilityState.power.sources.solar || 0) / 15));
+    const solarArrays = Array.from({ length: solarArrayCount }, (_, i) => {
+      const row = Math.floor(i / 3);
+      const col = i % 3;
+      const x = plan.site.x + 36 + col * 72;
+      const y = plan.site.y + plan.site.h - 96 + row * 24;
+      return `<g data-inspect-kind="power-source" data-inspect-key="solar">
+        <rect class="cad-solar-pad ${drawFill}" x="${x}" y="${y}" width="56" height="14" rx="2"></rect>
+        <line class="cad-solar-frame ${drawStroke}" x1="${x + 8}" y1="${y + 3}" x2="${x + 48}" y2="${y + 3}"></line>
+        <line class="cad-solar-frame ${drawStroke}" x1="${x + 6}" y1="${y + 7}" x2="${x + 50}" y2="${y + 7}"></line>
+        <line class="cad-solar-frame ${drawStroke}" x1="${x + 4}" y1="${y + 11}" x2="${x + 52}" y2="${y + 11}"></line>
+      </g>`;
+    }).join("");
+
+    const windPpa = showPower && facilityState.power.sources.wind > 0 ? `
+      <g data-inspect-kind="power-source" data-inspect-key="wind">
+        <path class="cad-wind-ppa ${drawStroke}" d="M${plan.site.x + plan.site.w + 20} ${plan.site.y + 42}H${plan.site.x + plan.site.w + 90}"></path>
+        <line class="cad-wind-mast ${drawStroke}" x1="${plan.site.x + plan.site.w + 112}" y1="${plan.site.y + 72}" x2="${plan.site.x + plan.site.w + 112}" y2="${plan.site.y + 30}"></line>
+        <circle class="cad-wind-hub ${drawFill}" cx="${plan.site.x + plan.site.w + 112}" cy="${plan.site.y + 28}" r="4"></circle>
+        <line class="cad-wind-blade ${drawStroke}" x1="${plan.site.x + plan.site.w + 112}" y1="${plan.site.y + 28}" x2="${plan.site.x + plan.site.w + 132}" y2="${plan.site.y + 22}"></line>
+        <line class="cad-wind-blade ${drawStroke}" x1="${plan.site.x + plan.site.w + 112}" y1="${plan.site.y + 28}" x2="${plan.site.x + plan.site.w + 98}" y2="${plan.site.y + 10}"></line>
+        <line class="cad-wind-blade ${drawStroke}" x1="${plan.site.x + plan.site.w + 112}" y1="${plan.site.y + 28}" x2="${plan.site.x + plan.site.w + 102}" y2="${plan.site.y + 48}"></line>
+        <text class="cad-small ${drawLabel}" x="${plan.site.x + plan.site.w + 22}" y="${plan.site.y + 34}">OFFSITE WIND PPA</text>
+      </g>
+    ` : "";
+
+    const smrBlock = showPower && facilityState.power.sources.smr > 0 ? `
+      <g data-inspect-kind="power-source" data-inspect-key="smr">
+        <rect class="cad-reactor-shell ${drawFill}" x="${plan.site.x + plan.site.w - 118}" y="${plan.site.y + 34}" width="74" height="42" rx="4"></rect>
+        <rect class="cad-reactor-stack ${drawFill}" x="${plan.site.x + plan.site.w - 82}" y="${plan.site.y + 18}" width="14" height="16" rx="2"></rect>
+        <text class="cad-small ${drawLabel}" x="${plan.site.x + plan.site.w - 112}" y="${plan.site.y + 28}">SMR YARD</text>
+      </g>
+    ` : "";
+
     const rackNodes = showCompute ? racks.slots.map((slot, idx) => {
       const installed = idx < racks.installed;
       const telemetry = ui.rackCache[idx];
@@ -3444,6 +3657,9 @@
         ${showPower ? `<rect class="cad-room cad-room-electrical ${drawFill}" x="${plan.rooms.switchgear.x}" y="${plan.rooms.switchgear.y}" width="${plan.rooms.switchgear.w}" height="${plan.rooms.switchgear.h}" data-inspect-kind="power-substation" data-inspect-key="switchgear"></rect>` : ""}
         ${showPower ? `<text class="cad-small ${drawLabel}" x="${plan.rooms.switchgear.x - 6}" y="${plan.rooms.switchgear.y - 8}">SWITCHGEAR</text>` : ""}
         ${powerFlow}
+        ${showPower ? solarArrays : ""}
+        ${windPpa}
+        ${smrBlock}
         ${showPower ? powerPads : ""}
         ${fuelFarm}
       </g>
@@ -3714,7 +3930,8 @@
         .slice(0, 2)
         .filter(([, pct]) => pct > 0)
         .map(([k]) => POWER_SRC[k].label.replace("FRONT-OF-METER ", "").replace("SMALL MODULAR ", ""));
-      return `${facilityState.power.targetMW || 0}MW ${top.join(" + ") || "POWER MIX"}`;
+      const power = ui.derived.powerPortfolio || computePowerPortfolio(facilityState.power.sources);
+      return `${facilityState.power.targetMW || 0}MW ${top.join(" + ") || "POWER MIX"} / ${power.firmPct.toFixed(0)}% FIRM`;
     }
     if (phase === 3) return `${FIBER_ACCESS[facilityState.fiber.accessType]?.label || "FIBER"} / ${facilityState.fiber.carriers.length} CARRIERS / ${IXP[facilityState.fiber.ixpRegion]?.label || "IXP"}`;
     if (phase === 4) return `${DEVELOPER[facilityState.facility.developerType]?.label || "DEVELOPER"} / ${COOLING[facilityState.facility.coolingType]?.label || "COOLING"}`;
@@ -3737,6 +3954,7 @@
   }
 
   function phaseSummaryInspect() {
+    const power = ui.derived.powerPortfolio || computePowerPortfolio(facilityState.power.sources);
     return {
       title: `PHASE ${facilityState.phase} OVERVIEW`,
       subtitle: "LIVE COST / TIMELINE INSPECTOR",
@@ -3748,9 +3966,10 @@
         ["IT LOAD (AFTER PUE)", `${kwToMw(ui.derived.itKw || 0).toFixed(2)} MW`],
         ["UPTIME PROJECTION", `${(ui.derived.uptime || 0).toFixed(3)}%`],
         ["LATENCY", `${(facilityState.fiber.latencyMs || 0).toFixed(1)} MS`],
+        ["FIRM BACKING", `${power.firmPct.toFixed(0)}%`],
         ["CITY", ui.derived.cityLabel || "UNSET"],
         ["WORKLOAD", ui.derived.workloadLabel || "UNSET"],
-        ["COST BASIS", ui.derived.costBasis || "MODEL"],
+        ["POWER LEAD", ui.derived.powerLead || "UNSET"],
       ],
       metrics: [
         ["POWER CAPEX", compactMoney(facilityState.economics.capexBreakdown.powerGenerationStorage || 0)],
@@ -3763,6 +3982,25 @@
   }
 
   function inspectFor(kind, key) {
+    if (kind === "location") {
+      const loc = LOCATION[key] || LOCATION[facilityState.site.locationType];
+      if (loc) {
+        return {
+          title: loc.label,
+          subtitle: "SITE TYPE PROFILE",
+          rows: [
+            ["LAND", `${CURRENCY0.format(loc.landPerAcre)} / ACRE`],
+            ["PERMIT WINDOW", `${loc.permitMonths[0]}-${loc.permitMonths[1]} MO`],
+            ["NIMBY", loc.nimby],
+            ["FIBER EDGE", `${loc.fiberMiles} MI`],
+            ["GRID EDGE", `${loc.gridMiles} MI`],
+          ],
+          metrics: [["NIMBY SCORE", `${loc.nimbyScore}/100`]],
+          viz: `<div class="viz-card">SITE TYPE SETS THE LAND BASIS, ENTITLEMENT FRICTION, AND THE EARLY CAMPUS GEOMETRY.</div>`,
+        };
+      }
+    }
+
     if (kind === "site-city") {
       const city = SITE_CITIES[key] || SITE_CITIES[facilityState.site.cityKey];
       if (city) {
@@ -3781,6 +4019,24 @@
       }
     }
 
+    if (kind === "permit") {
+      const permit = PERMIT[key] || PERMIT[facilityState.site.permittingTrack];
+      if (permit) {
+        return {
+          title: permit.label,
+          subtitle: "ENTITLEMENT TRACK",
+          rows: [
+            ["TIMELINE", `${permit.months[0]}-${permit.months[1]} MO`],
+            ["LAND MULT", `${permit.landMult.toFixed(2)}X`],
+            ["COST ADD", compactMoney(permit.costAdd)],
+            ["CURRENT TOTAL", compactMoney(facilityState.site.estimatedPermitCost || 0)],
+          ],
+          metrics: [["DELIVERY WINDOW", `${facilityState.site.permittingMonths || 0} MO`]],
+          viz: `<div class="viz-card">PERMITTING IS A DELIVERY GATE. IT MOVES BOTH THE BUILD TIMELINE AND THE LAND BASIS BEFORE ANY PLANT EQUIPMENT IS BOUGHT.</div>`,
+        };
+      }
+    }
+
     if (kind === "workload") {
       const workload = WORKLOAD_PROFILES[key] || WORKLOAD_PROFILES[facilityState.site.workloadProfile];
       if (workload) {
@@ -3795,6 +4051,96 @@
           ],
           metrics: [["MFU BIAS", `${(workload.mfuBias * 100).toFixed(1)}%`], ["DECODE MULT", `${workload.decodeMult.toFixed(2)}X`]],
           viz: `<div class="viz-card">${esc(workload.notes)}</div>`,
+        };
+      }
+    }
+
+    if (kind === "acreage") {
+      const maxMw = ui.derived.siteMaxMw || 0;
+      const targetMw = ui.derived.targetMw || 0;
+      return {
+        title: `${INTEGER.format(facilityState.site.acreage || 0)} ACRES`,
+        subtitle: "SITE ENVELOPE",
+        rows: [
+          ["SITE MAX", `${maxMw.toFixed(1)} MW`],
+          ["TARGET", `${targetMw.toFixed(1)} MW`],
+          ["UTILIZATION", maxMw > 0 ? `${((targetMw / maxMw) * 100).toFixed(1)}%` : "0.0%"],
+          ["EXPANSION ROOM", maxMw > 0 ? `${clamp(100 - (targetMw / maxMw) * 100, 0, 100).toFixed(1)}%` : "100.0%"],
+        ],
+        metrics: [["CITY DENSITY", `${(SITE_CITIES[facilityState.site.cityKey]?.maxMwPerAcre || 0).toFixed(2)} MW/ACRE`]],
+        viz: `<div class="viz-card">ACREAGE DEFINES THE PHYSICAL SITE ENVELOPE THAT EVERY DOWNSTREAM POWER, SHELL, AND RACK DECISION HAS TO FIT INSIDE.</div>`,
+      };
+    }
+
+    if (kind === "power-source") {
+      const src = POWER_SRC[key] || POWER_SRC.fom;
+      const pct = facilityState.power.sources[key] || 0;
+      const power = ui.derived.powerPortfolio || computePowerPortfolio(facilityState.power.sources);
+      return {
+        title: src.label,
+        subtitle: "POWER SOURCE ROLE",
+        rows: [
+          ["SHARE", `${pct.toFixed(0)}%`],
+          ["CLASS", src.class],
+          ["DELIVERY", src.delivery],
+          ["LEAD", src.lead],
+          ["ONSITE", src.onsite ? "YES" : "NO"],
+        ],
+        metrics: [
+          ["RATE", `${CURRENCY0.format(src.rateMwh)}/MWH`],
+          ["CAPEX", `${CURRENCY0.format(src.capexKw)}/KW`],
+          ["24/7 STATE", power.firmingState],
+        ],
+        viz: `<div class="viz-card">${src.renewable ? "THIS SOURCE ACTS AS A LOWER-CARBON OR LOWER-COST ENERGY OVERLAY AND STILL NEEDS FIRM BACKING." : "THIS SOURCE COUNTS TOWARD THE 24/7 FIRM BACKBONE OF THE FACILITY."}</div>`,
+      };
+    }
+
+    if (kind === "target-mw") {
+      return {
+        title: `${(ui.derived.targetMw || facilityState.power.targetMW || 0).toFixed(1)} MW TARGET`,
+        subtitle: "FACILITY POWER ENVELOPE",
+        rows: [
+          ["SITE MAX", `${(ui.derived.siteMaxMw || 0).toFixed(1)} MW`],
+          ["IT LOAD", `${kwToMw(ui.derived.itKw || 0).toFixed(2)} MW`],
+          ["POWER CAPEX", compactMoney(ui.derived.powerCapex || 0)],
+          ["LEAD", ui.derived.powerLead || "UNSET"],
+        ],
+        metrics: [["GRID STRESS", `${(ui.derived.gridStress || 0).toFixed(0)}/100`]],
+        viz: `<div class="viz-card">THIS IS THE FACILITY NAMEPLATE. THE COMPUTE FLOOR ONLY GETS THE IT LOAD LEFT AFTER PUE AND ELECTRICAL LOSSES.</div>`,
+      };
+    }
+
+    if (kind === "tier") {
+      const tier = REDUNDANCY[key] || REDUNDANCY[facilityState.power.redundancyTier];
+      if (tier) {
+        return {
+          title: tier.label,
+          subtitle: "RESILIENCE TIER",
+          rows: [
+            ["UPTIME", `${tier.uptime}%`],
+            ["DOWNTIME", `${tier.downtime.toFixed(1)} HRS/YR`],
+            ["CAPEX MULT", `${tier.mult.toFixed(2)}X`],
+          ],
+          metrics: [["PROJECTED UPTIME", `${(ui.derived.uptime || 0).toFixed(3)}%`]],
+          viz: `<div class="viz-card">TIER CHANGES MAINTAINABILITY, REDUNDANT PATH COUNT, AND WHAT THE POWER SYSTEM HAS TO ABSORB DURING FAILURES OR MAINTENANCE.</div>`,
+        };
+      }
+    }
+
+    if (kind === "ups") {
+      const ups = UPS[key] || UPS[facilityState.power.upsType];
+      if (ups) {
+        return {
+          title: ups.label,
+          subtitle: "TRANSIENT RIDE-THROUGH LAYER",
+          rows: [
+            ["RESPONSE", ups.response],
+            ["CYCLES", INTEGER.format(ups.cycles)],
+            ["ENERGY COST", `${CURRENCY0.format(ups.kwh)}/KWH`],
+            ["HVDC READY", ups.supercap ? "YES" : "NO"],
+          ],
+          metrics: [["UPS CAPEX", compactMoney((ui.derived.targetKw || 0) * (ups.kwCapex || 0))]],
+          viz: `<div class="viz-card">${ups.supercap ? "SUPERCAP + BESS ENABLES THE FASTEST TRANSIENT RESPONSE AND THE 800V HVDC PATH." : "THIS UPS COVERS SHORT-DURATION POWER EVENTS BUT DOES NOT UNLOCK THE HVDC / RUBIN PATH."}</div>`,
         };
       }
     }
@@ -3859,6 +4205,40 @@
       }
     }
 
+    if (kind === "fiber-access") {
+      const access = FIBER_ACCESS[key] || FIBER_ACCESS[facilityState.fiber.accessType];
+      if (access) {
+        return {
+          title: access.label,
+          subtitle: "FIBER ENTRY MODEL",
+          rows: [
+            ["CAPEX", compactMoney(access.capex)],
+            ["MONTHLY", compactMoney(access.mrc)],
+            ["CARRIER COUNT", `${facilityState.fiber.carriers.length}/2+`],
+          ],
+          metrics: [["LATENCY", `${(facilityState.fiber.latencyMs || 0).toFixed(1)} MS`]],
+          viz: `<div class="viz-card">THE ACCESS MODEL DECIDES HOW THE SITE REACHES THE MMR. IT IS A PHYSICAL CAMPUS DECISION, NOT JUST A TELCO BILL.</div>`,
+        };
+      }
+    }
+
+    if (kind === "ixp") {
+      const ixp = IXP[key] || IXP[facilityState.fiber.ixpRegion];
+      if (ixp) {
+        return {
+          title: ixp.label,
+          subtitle: "EXCHANGE PROXIMITY",
+          rows: [
+            ["DISTANCE", `${ixp.miles} MI`],
+            ["LATENCY", `${ixp.latency.toFixed(1)} MS`],
+            ["SUBSEA", ixp.subsea ? "YES" : "NO"],
+          ],
+          metrics: [["MODELED RTT", `${(facilityState.fiber.latencyMs || 0).toFixed(1)} MS`]],
+          viz: `<div class="viz-card">IXP CHOICE IS WHAT TURNS THE CARRIER SET INTO AN ACTUAL LATENCY PROFILE FOR USERS.</div>`,
+        };
+      }
+    }
+
     if (kind === "intra-node") {
       const n = INTRA_NODE[key];
       if (n) {
@@ -3887,6 +4267,202 @@
           viz: `<div class="viz-card">PER-LINK VS AGGREGATE BANDWIDTH IS SHOWN WITH EXPLICIT UNIT CONVERSION.</div>`,
         };
       }
+    }
+
+    if (kind === "developer") {
+      const dev = DEVELOPER[key] || DEVELOPER[facilityState.facility.developerType];
+      if (dev) {
+        return {
+          title: dev.label,
+          subtitle: "DELIVERY MODEL",
+          rows: [
+            ["COST / MW", compactMoney(dev.perMw)],
+            ["WINDOW", `${dev.months[0]}-${dev.months[1]} MO`],
+            ["SPEED FACTOR", `${dev.factor.toFixed(2)}X`],
+          ],
+          metrics: [["BUILD MONTHS", `${facilityState.facility.buildMonths || 0} MO`]],
+          viz: `<div class="viz-card">THE DEVELOPER MODEL CHANGES HOW QUICKLY THE PROCURED POWER ENVELOPE BECOMES A REAL, BUILDABLE SHELL.</div>`,
+        };
+      }
+    }
+
+    if (kind === "cooling") {
+      const cooling = COOLING[key] || COOLING[facilityState.facility.coolingType];
+      if (cooling) {
+        return {
+          title: cooling.label,
+          subtitle: "THERMAL PLANT",
+          rows: [
+            ["DENSITY", `${INTEGER.format(cooling.density)} KW/RACK`],
+            ["INSTALL", compactMoney(cooling.perMw)],
+            ["PUE RANGE", `${cooling.pue[0]}-${cooling.pue[1]}`],
+          ],
+          metrics: [["TARGET PUE", `${(facilityState.facility.pue || 2).toFixed(2)}`]],
+          viz: `<div class="viz-card">COOLING IS WHAT TURNS FACILITY LOAD INTO USABLE IT LOAD. IT DECIDES HOW DENSE THE GPU FLOOR CAN REALLY BE.</div>`,
+        };
+      }
+    }
+
+    if (kind === "arch") {
+      const arch = ARCH[key] || ARCH[facilityState.facility.powerArchitecture];
+      if (arch) {
+        return {
+          title: arch.label,
+          subtitle: "ELECTRICAL DISTRIBUTION",
+          rows: [
+            ["LOSSES", `${arch.loss}%`],
+            ["COPPER SAVINGS", `${arch.copper}%`],
+            ["CAPEX / MW", compactMoney(arch.perMw)],
+          ],
+          metrics: [["HVDC LOCK", arch.supercap ? "SUPERCAP REQUIRED" : "NONE"]],
+          viz: `<div class="viz-card">THIS IS THE POWER PATH FROM SWITCHGEAR TO RACKS. IT HAS TO MATCH THE UPS STACK AND THE GPU POWER DENSITY.</div>`,
+        };
+      }
+    }
+
+    if (kind === "gpu") {
+      const gpu = GPU[key] || GPU[facilityState.compute.gpuModel];
+      if (gpu) {
+        return {
+          title: gpu.label,
+          subtitle: "COMPUTE PLATFORM",
+          rows: [
+            ["CARD POWER", `${(gpu.kw * 1000).toFixed(0)} W`],
+            ["VRAM", `${INTEGER.format(gpu.vram)} GB`],
+            ["FP8", `${gpu.pf.toFixed(2)} PFLOPS`],
+            ["COST", compactMoney(gpu.cost)],
+          ],
+          metrics: [["RACK COUNT", INTEGER.format(facilityState.compute.rackCount || 0)]],
+          viz: `<div class="viz-card">THE GPU CHOICE ONLY MAKES SENSE IF THE COOLING AND ELECTRICAL STACK CAN SUPPORT ITS RACK DENSITY.</div>`,
+        };
+      }
+    }
+
+    if (kind === "stack") {
+      const stack = STACK[key] || STACK[facilityState.compute.inferenceStack];
+      if (stack) {
+        return {
+          title: stack.label,
+          subtitle: "INFERENCE ENGINE",
+          rows: [
+            ["BEST FOR", stack.best],
+            ["MFU RANGE", `${Math.round(stack.mfu[0] * 100)}-${Math.round(stack.mfu[1] * 100)}%`],
+            ["SEED TPS", `${stack.seedTps.toFixed(2)}X`],
+            ["SEED TTFT", `${stack.seedTtft.toFixed(2)}X`],
+          ],
+          metrics: [["EST. MFU", `${((ui.derived.estimatedMfu || 0) * 100).toFixed(1)}%`]],
+          viz: `<div class="viz-card">THE ENGINE DECIDES HOW MUCH OF THE INSTALLED HARDWARE YOU ACTUALLY TURN INTO TOKENS.</div>`,
+        };
+      }
+    }
+
+    if (kind === "serving") {
+      const serving = SERVING[key] || SERVING[facilityState.compute.servingArch];
+      if (serving) {
+        return {
+          title: serving.label,
+          subtitle: "CAPACITY POLICY",
+          rows: [
+            ["UTIL TARGET", `${Math.round(serving.util * 100)}%`],
+            ["MFU ADJ", `${serving.mfuAdj >= 0 ? "+" : ""}${Math.round(serving.mfuAdj * 100)}%`],
+          ],
+          metrics: [["LIVE MW", `${(ui.derived.mwLive || 0).toFixed(2)} MW`]],
+          viz: `<div class="viz-card">SERVING POLICY IS WHERE USER EXPERIENCE AND CAPEX EFFICIENCY START TO FIGHT EACH OTHER.</div>`,
+        };
+      }
+    }
+
+    if (kind === "external") {
+      const external = EXTERNAL[key] || EXTERNAL[facilityState.networking.externalBandwidth];
+      if (external) {
+        return {
+          title: external.label,
+          subtitle: "WAN EDGE",
+          rows: [
+            ["USER SCALE", INTEGER.format(external.users)],
+            ["TTFT ADD", `${external.ttft.toFixed(1)} MS`],
+            ["ANNUAL", compactMoney(external.annual)],
+          ],
+          metrics: [["REQUEST LOAD", INTEGER.format(ui.mapStats.req || 0)]],
+          viz: `<div class="viz-card">EVEN A FAST DATA FLOOR FEELS SLOW IF THE EXTERNAL EDGE IS UNDER-SIZED FOR THE USER BASE.</div>`,
+        };
+      }
+    }
+
+    if (kind === "nodes") {
+      return {
+        title: `${INTEGER.format(facilityState.networking.nodeCount || 0)} NODES`,
+        subtitle: "CLUSTER SCALE",
+        rows: [
+          ["SWITCHES", INTEGER.format(ui.derived.switchCount || 0)],
+          ["AGGREGATE", `${(ui.derived.allReduceGBps || 0).toFixed(1)} GB/S`],
+          ["RISK", ui.derived.networkRisk || "UNSET"],
+        ],
+        metrics: [["NETWORK PENALTY", `${(ui.derived.networkPenalty || 0).toFixed(1)}`]],
+        viz: `<div class="viz-card">THIS STEP IS ABOUT WHETHER THE CLUSTER STILL SCALES CLEANLY ONCE IT LEAVES THE SINGLE-RACK WORLD.</div>`,
+      };
+    }
+
+    if (kind === "monitoring") {
+      const monitoring = MONITORING[key] || MONITORING[facilityState.dcim.monitoringApproach];
+      if (monitoring) {
+        return {
+          title: monitoring.label,
+          subtitle: "OBSERVABILITY STACK",
+          rows: [
+            ["MTTD", `${monitoring.mttd} MIN`],
+            ["OPEX", compactMoney(monitoring.opex)],
+            ["HEALTH", `+${monitoring.score}`],
+          ],
+          metrics: [["HEALTH SCORE", `${(ui.derived.health || 0).toFixed(1)}/100`]],
+          viz: `<div class="viz-card">MONITORING MAKES THE COMPLETED BUILD OPERABLE. WITHOUT IT, THE FACILITY LOOKS COMPLETE BUT IS STILL BLIND.</div>`,
+        };
+      }
+    }
+
+    if (kind === "maintenance") {
+      const maintenance = MAINT[key] || MAINT[facilityState.dcim.maintenanceModel];
+      if (maintenance) {
+        return {
+          title: maintenance.label,
+          subtitle: "OPERATING MODEL",
+          rows: [
+            ["HOURS SAVED", `${maintenance.saved >= 0 ? "+" : ""}${maintenance.saved} HRS/YR`],
+            ["CREW", `${maintenance.crew}`],
+            ["OPEX", compactMoney(maintenance.opex)],
+          ],
+          metrics: [["UPTIME", `${(ui.derived.uptime || 0).toFixed(3)}%`]],
+          viz: `<div class="viz-card">MAINTENANCE POSTURE IS A PRIMARY UPTIME DRIVER. IT BELONGS IN THE BUILD MODEL, NOT AFTER IT.</div>`,
+        };
+      }
+    }
+
+    if (kind === "telemetry") {
+      return {
+        title: facilityState.dcim.coolingTelemetry ? "COOLING TELEMETRY ON" : "COOLING TELEMETRY OFF",
+        subtitle: "THERMAL SENSING",
+        rows: [
+          ["STATE", facilityState.dcim.coolingTelemetry ? "ENABLED" : "DISABLED"],
+          ["UPTIME DELTA", facilityState.dcim.coolingTelemetry ? "+0.012%" : "0.000%"],
+          ["HEALTH BONUS", facilityState.dcim.coolingTelemetry ? "+9" : "-2"],
+        ],
+        metrics: [["OPEX ADD", facilityState.dcim.coolingTelemetry ? compactMoney(125000) : compactMoney(0)]],
+        viz: `<div class="viz-card">COOLING TELEMETRY IS WHAT MAKES DENSE GPU COOLING OPERABLE UNDER REAL MAINTENANCE AND FAILURE CONDITIONS.</div>`,
+      };
+    }
+
+    if (kind === "power-substation") {
+      return {
+        title: "MAIN ELECTRICAL ROOM",
+        subtitle: "SWITCHGEAR / DISTRIBUTION",
+        rows: [
+          ["TARGET", `${(ui.derived.targetMw || 0).toFixed(1)} MW`],
+          ["ARCH", ARCH[facilityState.facility.powerArchitecture]?.label || "UNSET"],
+          ["UPS", UPS[facilityState.power.upsType]?.label || "UNSET"],
+        ],
+        metrics: [["IT LOAD", `${kwToMw(ui.derived.itKw || 0).toFixed(2)} MW`]],
+        viz: `<div class="viz-card">THIS ROOM IS THE HANDOFF FROM THE POWER PROCUREMENT PLAN INTO THE WHITE-SPACE ELECTRICAL DISTRIBUTION TREE.</div>`,
+      };
     }
 
     return phaseSummaryInspect();
