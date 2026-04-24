@@ -32,9 +32,9 @@ ICE = QColor("#d9ecff")
 SHEET_COLS = 10
 FRAME_SIZE = 48
 
-CALGARY_FRAME_RANGE = range(25, 41)
-CALGARY_REL_X = 0.28
-CALGARY_REL_Y = 0.30
+FACILITY_FRAME_RANGE = range(25, 41)
+FACILITY_REL_X = 0.28
+FACILITY_REL_Y = 0.30
 
 SCENE_W, SCENE_H = 1600, 900
 FAST_INTRO = os.getenv("IDT_FAST_INTRO", "1") != "0"
@@ -157,7 +157,7 @@ class SpaceTitleScreen(QGraphicsView):
         self._location_chip.setZValue(6)
         self._scene.addItem(self._location_chip)
 
-        self._location_text = QGraphicsTextItem("CALGARY // AB // CANADA")
+        self._location_text = QGraphicsTextItem("FACILITY-01 // INGEST // LIVE")
         self._location_text.setDefaultTextColor(ICE)
         self._location_text.setFont(QFont("Consolas", 12, QFont.Weight.Bold))
         self._location_text.setOpacity(0.0)
@@ -171,9 +171,9 @@ class SpaceTitleScreen(QGraphicsView):
         self._status_text.setZValue(8)
         self._scene.addItem(self._status_text)
 
-        self._brand_text = QGraphicsTextItem("WATT-BIT INTELLIGENCE")
-        self._brand_text.setDefaultTextColor(QColor(245, 166, 35, 150))
-        self._brand_text.setFont(QFont("Bahnschrift SemiBold", 13))
+        self._brand_text = QGraphicsTextItem("INFERENCE DIGITAL TWIN")
+        self._brand_text.setDefaultTextColor(QColor(51, 251, 211, 180))
+        self._brand_text.setFont(QFont("Comfortaa", 13, QFont.Weight.Bold))
         self._brand_text.setPos(SCENE_W - 330, 58)
         self._brand_text.setZValue(8)
         self._scene.addItem(self._brand_text)
@@ -287,9 +287,9 @@ class SpaceTitleScreen(QGraphicsView):
 
         self._update_earth_frame()
 
-        calgary_visible = self._frame_idx in CALGARY_FRAME_RANGE
+        facility_visible = self._frame_idx in FACILITY_FRAME_RANGE
         marker_strength = 0.0
-        if t > 0.32 and calgary_visible:
+        if t > 0.32 and facility_visible:
             pulse = 0.64 + 0.36 * ((self._elapsed % 900) / 900.0)
             marker_strength = pulse if t < 0.9 else max(0.0, 1.0 - (t - 0.9) / 0.1)
             self._position_marker(marker_strength)
@@ -321,8 +321,8 @@ class SpaceTitleScreen(QGraphicsView):
         display_size = FRAME_SIZE * scale
 
         if scale > 8.0:
-            cx = SCENE_W * 0.48 - CALGARY_REL_X * display_size
-            cy = SCENE_H * 0.51 - CALGARY_REL_Y * display_size
+            cx = SCENE_W * 0.48 - FACILITY_REL_X * display_size
+            cy = SCENE_H * 0.51 - FACILITY_REL_Y * display_size
         else:
             cx = (SCENE_W - display_size) / 2
             cy = (SCENE_H - display_size) / 2
@@ -351,8 +351,8 @@ class SpaceTitleScreen(QGraphicsView):
         display_size = FRAME_SIZE * scale
         earth_pos = self._earth_day_item.pos()
 
-        mx = earth_pos.x() + CALGARY_REL_X * display_size
-        my = earth_pos.y() + CALGARY_REL_Y * display_size
+        mx = earth_pos.x() + FACILITY_REL_X * display_size
+        my = earth_pos.y() + FACILITY_REL_Y * display_size
 
         self._marker.setPos(mx, my)
         self._glow.setPos(mx, my)
