@@ -19,11 +19,11 @@ pip install -e .
 python run.py
 ```
 
-Open **[http://localhost:8000/forge](http://localhost:8000/forge)** in your browser.
+The browser opens automatically. If it doesn't, go to **[http://127.0.0.1:8000/forge](http://127.0.0.1:8000/forge)**.
 
 ### Option B — Desktop app (Windows, macOS, Linux)
 
-Runs The Forge in a native window with an opening intro sequence. Requires PyQt6.
+Runs The Forge in a native window with a Watt-Bit Intelligence title screen followed by The Forge. Manual-dismiss only — press Enter, Space, Esc, or click to continue. Requires PyQt6.
 
 ```bash
 pip install -e ".[desktop]"
@@ -88,7 +88,7 @@ desktop/           Native desktop wrapper (PyQt6 + QWebEngineView)
   screens/         Opening animation, logo reveal, main browser window
   assets/          Sprite sheets, Watt-Bit icons
 web/               Next.js web frontend (React + Tailwind, connects to FastAPI via CORS)
-tests/             34 tests (contracts, modules, integration, frontend regressions)
+tests/             39 tests (contracts, modules, integration, frontend regressions)
 run.py             Start the web server at http://localhost:8000
 launch.bat         Windows one-click launcher (auto-creates venv on first run)
 ```
