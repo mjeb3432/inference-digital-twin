@@ -49,22 +49,24 @@ body[data-theme="dark"] {
 }
 
 body.explorer-page {
-  --bg: #060b12;
-  --bg-raised: #0d1824;
-  --surface: #0d1623;
-  --surface-alt: #111f30;
-  --text-primary: #e7f6ff;
-  --text-muted: #8ca4b8;
-  --border: #23405c;
-  --accent: #19d4cc;
-  --accent-strong: #12bdb5;
-  --secondary: #4ab2ff;
-  --success: #42d98b;
-  --warning: #ffb347;
-  --error: #ff7589;
-  --info: #76c4ff;
-  --shadow: 0 16px 34px rgba(0, 0, 0, 0.42);
-  --font-ui: "Space Grotesk", "Plus Jakarta Sans", "Segoe UI", sans-serif;
+  --bg: #08090B;
+  --bg-raised: #0F1114;
+  --surface: #0F1114;
+  --surface-alt: #171A1F;
+  --text-primary: #EDEDED;
+  --text-muted: #A0A4AB;
+  --border: #23272D;
+  --accent: #F5A623;
+  --accent-strong: #d48f17;
+  --secondary: #8B5CF6;
+  --success: #4ADE80;
+  --warning: #FBBF24;
+  --error: #F87171;
+  --info: #60A5FA;
+  --shadow: 0 16px 34px rgba(0, 0, 0, 0.5);
+  --font-ui: "IBM Plex Sans Condensed", "Inter", sans-serif;
+  --font-data: "JetBrains Mono", monospace;
+  --font-code: "JetBrains Mono", monospace;
 }
 
 body.explorer-page[data-theme="light"] {
@@ -93,13 +95,7 @@ body {
 }
 
 body.explorer-page {
-  background:
-    radial-gradient(circle at 16% 18%, rgba(25, 212, 204, 0.2), transparent 38%),
-    radial-gradient(circle at 88% 14%, rgba(74, 178, 255, 0.16), transparent 34%),
-    linear-gradient(90deg, rgba(58, 119, 184, 0.08) 1px, transparent 1px),
-    linear-gradient(0deg, rgba(58, 119, 184, 0.06) 1px, transparent 1px),
-    var(--bg);
-  background-size: auto, auto, 34px 34px, 34px 34px, auto;
+  background: var(--bg);
 }
 
 a {
