@@ -91,7 +91,7 @@
   top: 55%;
   width: 34vw;
   height: 34vw;
-  background: radial-gradient(circle, rgba(34, 211, 238, 0.35) 0%, transparent 70%);
+  background: radial-gradient(circle, rgba(139, 92, 246, 0.28) 0%, transparent 70%);
   animation-delay: -3s;
 }
 
@@ -100,7 +100,7 @@
   50%      { transform: translate(2%, -1%) scale(1.06); opacity: 0.65; }
 }
 
-/* Red horizontal scan line sweeping top to bottom */
+/* Amber horizontal scan line sweeping top to bottom */
 .intro-scan-css {
   position: absolute;
   left: 0;
@@ -109,11 +109,11 @@
   pointer-events: none;
   background: linear-gradient(
     to bottom,
-    rgba(255, 30, 30, 0) 0%,
-    rgba(255, 80, 80, 0.28) 48%,
-    rgba(255, 120, 120, 0.55) 50%,
-    rgba(255, 80, 80, 0.28) 52%,
-    rgba(255, 30, 30, 0) 100%
+    rgba(245, 166, 35, 0) 0%,
+    rgba(245, 166, 35, 0.18) 48%,
+    rgba(245, 166, 35, 0.38) 50%,
+    rgba(245, 166, 35, 0.18) 52%,
+    rgba(245, 166, 35, 0) 100%
   );
   filter: blur(4px);
   mix-blend-mode: screen;
