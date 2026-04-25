@@ -8,7 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Comfortaa:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/intro.css?v=20260425c" />
+  <link rel="stylesheet" href="/static/intro.css?v=20260425d" />
   <link rel="stylesheet" href="/static/forge.css?v=20260425b" />
   <link rel="stylesheet" href="/static/global-nav.css?v=20260425b" />
 </head>
@@ -108,6 +108,14 @@
       ENTER THE HALL
       <span class="intro-enter-arrow" aria-hidden="true">&rsaquo;</span>
     </button>
+
+    <!-- Skip-tutorial control: a small toggle that, when armed, tells the
+         dismiss handler to also persist a "skip-on-load" flag. Returning
+         users land straight in the Forge without seeing the intro again. -->
+    <label class="intro-skip-toggle" aria-label="Skip the intro on future visits">
+      <input id="introSkipForever" type="checkbox" />
+      <span class="intro-skip-toggle-text">Don&rsquo;t show this again</span>
+    </label>
   </div>
 
   <!-- ============================================================
@@ -119,12 +127,36 @@
       var overlay = document.getElementById('introOverlay');
       if (!overlay) return;
 
+      var SKIP_KEY = 'forge:intro:skip-forever:v1';
+      var skipCheckbox = document.getElementById('introSkipForever');
+
+      // Restore prior preference into the checkbox + auto-dismiss the
+      // intro immediately if the user previously asked us to skip it.
+      var skipForever = false;
+      try { skipForever = window.localStorage.getItem(SKIP_KEY) === 'true'; } catch (_) {}
+      if (skipCheckbox) skipCheckbox.checked = skipForever;
+      if (skipForever) {
+        // Vanish the overlay synchronously — no animation. Saves the user
+        // ~3 seconds of the intro on every return visit.
+        overlay.dataset.state = 'gone';
+      }
+
       var mountedAt = Date.now();
       var dismissed = false;
 
       function dismiss() {
         if (dismissed) return;
         dismissed = true;
+        // Persist the user's "don't show again" choice on dismiss so the
+        // checkbox state at-time-of-dismiss is what we save (not what they
+        // happened to set on first paint).
+        try {
+          if (skipCheckbox && skipCheckbox.checked) {
+            window.localStorage.setItem(SKIP_KEY, 'true');
+          } else {
+            window.localStorage.removeItem(SKIP_KEY);
+          }
+        } catch (_) {}
         overlay.dataset.state = 'exiting';
         setTimeout(function () {
           overlay.dataset.state = 'gone';
@@ -146,6 +178,10 @@
       if (skip)  skip.addEventListener('click', function (e) { e.stopPropagation(); dismiss(); });
       if (enter) enter.addEventListener('click', function (e) { e.stopPropagation(); dismiss(); });
 
+      // Clicking the checkbox/label shouldn't dismiss the overlay.
+      var skipToggle = overlay.querySelector('.intro-skip-toggle');
+      if (skipToggle) skipToggle.addEventListener('click', function (e) { e.stopPropagation(); });
+
       window.addEventListener('keydown', function (e) {
         if (e.key === 'Enter' || e.key === 'Escape' || e.key === ' ' || e.key === 'Spacebar') {
           dismiss();
@@ -155,7 +191,7 @@
       // Click anywhere on the overlay background dismisses too.
       overlay.addEventListener('click', function (e) {
         var tag = (e.target && e.target.tagName) || '';
-        if (tag === 'BUTTON') return;
+        if (tag === 'BUTTON' || tag === 'INPUT' || tag === 'LABEL') return;
         dismiss();
       });
 
