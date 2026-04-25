@@ -9,8 +9,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Comfortaa:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/static/intro.css?v=20260425c" />
-  <link rel="stylesheet" href="/static/forge.css?v=20260425a" />
-  <link rel="stylesheet" href="/static/global-nav.css?v=20260424" />
+  <link rel="stylesheet" href="/static/forge.css?v=20260425b" />
+  <link rel="stylesheet" href="/static/global-nav.css?v=20260425b" />
 </head>
 <body class="forge-page" data-active-nav="build">
 
@@ -165,8 +165,8 @@
   <!-- WebGL2 intro (vanilla, no three.js dep) -->
   <script src="/static/intro.js?v=20260425c" defer></script>
   <!-- Cross-page Forge state bridge (must load before forge.js) -->
-  <script src="/static/forge-state.js?v=20260425a" defer></script>
-  <script src="/static/forge.js?v=20260425a" defer></script>
+  <script src="/static/forge-state.js?v=20260425c" defer></script>
+  <script src="/static/forge.js?v=20260425b" defer></script>
   <script src="/static/forge-zoom.js?v=20260424a" defer></script>
 
   <div class="desktop-banner" role="status">BEST VIEWED ON DESKTOP (1024PX+)</div>
@@ -211,6 +211,7 @@
           <button id="exportScenarioButton" class="ghost-button" type="button">EXPORT SCENARIO JSON</button>
           <button id="importScenarioButton" class="ghost-button" type="button">IMPORT SCENARIO JSON</button>
           <button id="exportEventLogButton" class="ghost-button" type="button">EXPORT EVENT LOG</button>
+          <button id="resetBuildButton" class="ghost-button ghost-button-danger" type="button" title="Discard the current build and start a fresh facility from Phase 1">RESET BUILD</button>
           <input id="importScenarioInput" type="file" accept=".json,application/json" hidden />
         </div>
         <div id="buildLog" class="build-log" aria-live="polite"></div>

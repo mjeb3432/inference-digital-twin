@@ -177,6 +177,17 @@ let currentSnapshot = null;
 
 function initDashboard() {
   currentSnapshot = loadSnapshot();
+
+  /* Build-completion gate — Dashboard only opens once the user has
+     finished the 8-phase build in the Forge. If they navigate here
+     directly we render a full-page lock and bail out. */
+  if (window.ForgeState && !window.ForgeState.isBuildComplete()) {
+    window.ForgeState.renderLockOverlayIfNeeded({ pageName: "The Dashboard" });
+    window.ForgeState.applyNavGate();
+    return;
+  }
+  if (window.ForgeState) window.ForgeState.applyNavGate();
+
   applyForgeOverlay(currentSnapshot);
   RACKS = generateRackData(currentSnapshot);
   selectedRack = RACKS[0];
