@@ -24,14 +24,43 @@ let currentLOD = 0;
 let selectedRack = 'B-03';
 const lodLevels = ['FLOOR', 'RACK', 'CHASSIS', 'TRAY', 'GPU'];
 
-// ─── Rack Data ────────────────────────────────────────────────────────
-const RACK_ROWS = ['A', 'B', 'C', 'D'];
-const RACK_COLS = [1, 2, 3, 4, 5];
+// ─── Forge snapshot integration ─────────────────────────────────────
+function getSnapshot() {
+  try { return window.ForgeState ? window.ForgeState.read() : null; } catch (_) { return null; }
+}
+
+function rackLayoutFor(count) {
+  if (count <= 8)  return { rows: ['A', 'B'],            cols: [1, 2, 3, 4] };
+  if (count <= 12) return { rows: ['A', 'B', 'C'],       cols: [1, 2, 3, 4] };
+  if (count <= 20) return { rows: ['A', 'B', 'C', 'D'],  cols: [1, 2, 3, 4, 5] };
+  if (count <= 30) return { rows: ['A', 'B', 'C', 'D', 'E'], cols: [1, 2, 3, 4, 5, 6] };
+  if (count <= 42) return { rows: ['A', 'B', 'C', 'D', 'E', 'F'], cols: [1, 2, 3, 4, 5, 6, 7] };
+  return { rows: ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'], cols: [1, 2, 3, 4, 5, 6, 7, 8] };
+}
+
+// ─── Rack Data — adapts to snapshot.compute.rackCount ──────────────
+let RACK_ROWS = ['A', 'B', 'C', 'D'];
+let RACK_COLS = [1, 2, 3, 4, 5];
+let GPU_LABEL = 'H100 SXM5';
+let GPUS_PER_RACK = 8;
 
 function generateIsoRacks() {
+  const snap = getSnapshot();
+  if (snap && window.ForgeState) {
+    const layout = rackLayoutFor(window.ForgeState.deriveRackCount(snap));
+    RACK_ROWS = layout.rows;
+    RACK_COLS = layout.cols;
+    GPU_LABEL = window.ForgeState.deriveGpuModel(snap);
+    GPUS_PER_RACK = Number(snap.compute?.gpusPerRack) || 8;
+  }
+
+  const total = (snap && window.ForgeState ? window.ForgeState.deriveRackCount(snap) : RACK_ROWS.length * RACK_COLS.length);
   const racks = [];
+  let placed = 0;
   for (const row of RACK_ROWS) {
     for (const col of RACK_COLS) {
+      if (placed >= total) break;
+      placed++;
       const id = `${row}-${String(col).padStart(2, '0')}`;
       const cpu = Math.round(rng.range(45, 95));
       const status = cpu > 85 ? 'critical' : cpu > 75 ? 'warn' : 'online';
@@ -41,7 +70,7 @@ function generateIsoRacks() {
   return racks;
 }
 
-const ISO_RACKS = generateIsoRacks();
+let ISO_RACKS = generateIsoRacks();
 
 // ─── Isometric Projection ────────────────────────────────────────────
 function isoProject(x, y, z = 0) {
@@ -50,12 +79,18 @@ function isoProject(x, y, z = 0) {
   return { isoX, isoY };
 }
 
-// ─── Render LOD 0: FLOOR (4x5 rack grid + spine) ───────────────────
+// ─── Render LOD 0: FLOOR (rack grid sized to forge state + spine) ──
 function renderFloorView() {
   const svg = document.getElementById('isoView');
   svg.innerHTML = '';
 
-  const startX = 50, startY = 250, cellW = 80, cellH = 80;
+  /* Pick a cell size that fits the chosen grid into the 800×600 canvas */
+  const numCols = RACK_COLS.length;
+  const numRows = RACK_ROWS.length;
+  const cellW = Math.max(48, Math.min(80, Math.floor(700 / numCols)));
+  const cellH = Math.max(48, Math.min(80, Math.floor(360 / Math.max(1, numRows))));
+  const startX = 50;
+  const startY = 250 - Math.max(0, (numRows - 4) * (cellH / 2));
 
   // Background
   const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
@@ -65,24 +100,21 @@ function renderFloorView() {
   svg.appendChild(bg);
 
   // Rack grid
-  let col = 0;
   ISO_RACKS.forEach((rack, idx) => {
-    const row = Math.floor(idx / 5);
-    col = idx % 5;
-
+    const row = Math.floor(idx / numCols);
+    const col = idx % numCols;
     const x = startX + col * cellW;
     const y = startY + row * cellH;
-
     drawRackBlock(svg, x, y, rack, 'floor');
   });
 
-  // Spine node (hovering above)
-  const spineX = startX + 2 * cellW;
-  const spineY = 100;
+  // Spine node (hovering above the grid centre)
+  const spineX = startX + Math.floor(numCols / 2) * cellW;
+  const spineY = Math.max(40, startY - 150);
   drawSpineNode(svg, spineX, spineY);
 
   // Dashed lines from spine to top-of-row racks
-  for (let c = 0; c < 5; c++) {
+  for (let c = 0; c < numCols; c++) {
     const rackX = startX + c * cellW;
     const rackY = startY;
     const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
@@ -626,8 +658,8 @@ function updateRackInspector() {
     Temp: `${Math.round(rng.range(75, 87))}°C`,
     Uptime: `${Math.round(rng.range(100, 300))}d`,
     'Last Ping': `${Math.round(rng.range(1, 10))}ms`,
-    'GPU Model': 'H100 SXM5',
-    'GPU Count': '8',
+    'GPU Model': GPU_LABEL,
+    'GPU Count': String(GPUS_PER_RACK),
     Firmware: '2024.Q1.19',
   };
 
@@ -635,6 +667,56 @@ function updateRackInspector() {
     const el = document.getElementById(`det${key.replace(/\s+/g, '')}`);
     if (el) el.textContent = val;
   });
+}
+
+// ─── Apply forge snapshot to static page chrome ────────────────────
+function applyForgeOverlay() {
+  const snap = getSnapshot();
+  if (!snap || !window.ForgeState) return;
+
+  // Facility hierarchy heading + selected node label
+  const dcCode = window.ForgeState.deriveDcCode(snap);
+  const headerH2 = document.querySelector('.control-left .left-header h2');
+  if (headerH2) {
+    const cityRaw = window.ForgeState.formatCityLabel(snap);
+    const cityName = (cityRaw || 'Toronto').split(',')[0].trim();
+    headerH2.textContent = cityName ? `${cityName} Grid` : 'Global Grid';
+  }
+  const dcLabelNodes = document.querySelectorAll('.tree-node.selected .tree-label');
+  dcLabelNodes.forEach((el) => { el.textContent = dcCode; });
+
+  // Quick filters: status counts derived from rack list
+  const onlineCount = ISO_RACKS.filter((r) => r.status === 'online').length;
+  const warnCount = ISO_RACKS.filter((r) => r.status === 'warn').length;
+  const criticalCount = ISO_RACKS.filter((r) => r.status === 'critical').length;
+  const so = document.getElementById('statusOnline');
+  const sw = document.getElementById('statusWarn');
+  const sc = document.getElementById('statusCritical');
+  if (so) so.textContent = String(onlineCount);
+  if (sw) sw.textContent = String(warnCount);
+  if (sc) sc.textContent = String(criticalCount);
+
+  // Active alerts: prefer real warning racks
+  const alertsList = document.querySelector('.control-left .alerts-panel .alerts-list');
+  if (alertsList) {
+    const flagged = ISO_RACKS.filter((r) => r.status !== 'online').slice(0, 3);
+    if (flagged.length) {
+      alertsList.innerHTML = flagged
+        .map((r) => `
+          <div class="alert-item ${r.status}">
+            <span class="alert-icon">[${r.status === 'critical' ? 'X' : '!'}]</span>
+            <span class="alert-text">RACK-${r.id} ${r.status === 'critical' ? 'PSU degraded' : 'thermal warning'}</span>
+          </div>
+        `)
+        .join('');
+    }
+  }
+
+  // Center header: include workload context
+  const centerKicker = document.querySelector('.control-center .center-header .kicker');
+  if (centerKicker && snap.facility?.workloadLabel) {
+    centerKicker.textContent = `CONTROL ROOM · ${snap.facility.workloadLabel}`;
+  }
 }
 
 // ─── Scroll-Zoom Handler ──────────────────────────────────────────────
@@ -655,7 +737,21 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // Init
-  updateLODView();
-  updateRackInspector();
+  // ── Apply Forge snapshot to chrome + grid, then render ─────────
+  function refreshFromSnapshot() {
+    ISO_RACKS = generateIsoRacks();
+    /* Pick the first rack if our previously-selected one no longer exists */
+    if (!ISO_RACKS.find((r) => r.id === selectedRack)) {
+      selectedRack = ISO_RACKS[0]?.id || 'A-01';
+    }
+    applyForgeOverlay();
+    updateLODView();
+    updateRackInspector();
+  }
+
+  refreshFromSnapshot();
+
+  if (window.ForgeState && typeof window.ForgeState.subscribe === 'function') {
+    window.ForgeState.subscribe(() => refreshFromSnapshot());
+  }
 });
