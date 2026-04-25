@@ -2207,6 +2207,116 @@
     hydrateRackCache();
     syncMapStats();
     facilityState.scenario.updatedAt = new Date().toISOString();
+    publishFacilitySnapshot();
+  }
+
+  /* ============================================================
+   * Cross-page sync: publish a compact snapshot to localStorage
+   * after every recalc so the Dashboard and Control Room can
+   * reflect the user's actual build instead of static defaults.
+   * ============================================================ */
+  function publishFacilitySnapshot() {
+    if (typeof window.ForgeState !== "object") return;
+    try {
+      const d = ui.derived || {};
+      const bench = d.bench || {};
+      const gpuKey = facilityState.compute.gpuModel;
+      const gpu = gpuKey && typeof GPU !== "undefined" ? GPU[gpuKey] : null;
+      const stackKey = facilityState.compute.inferenceStack;
+      const stack = stackKey && typeof STACK !== "undefined" ? STACK[stackKey] : null;
+      const cooling = facilityState.facility.coolingType && typeof COOLING !== "undefined" ? COOLING[facilityState.facility.coolingType] : null;
+      const fabricKey = facilityState.networking.fabric;
+      const fabric = fabricKey && typeof FABRIC !== "undefined" ? FABRIC[fabricKey] : null;
+      const intraKey = facilityState.networking.intraNode;
+      const intra = intraKey && typeof INTRA_NODE !== "undefined" ? INTRA_NODE[intraKey] : null;
+      const upsLabel =
+        facilityState.power.upsType === "vrla" ? "Legacy VRLA" :
+        facilityState.power.upsType === "liion" ? "Li-Ion" :
+        facilityState.power.upsType === "supercap" ? "Supercaps + BESS" :
+        null;
+      const tierLabel = facilityState.power.redundancyTier
+        ? facilityState.power.redundancyTier.toUpperCase().replace("T", "TIER ")
+        : null;
+
+      const snapshot = {
+        facility: {
+          cityKey: facilityState.site.cityKey,
+          cityLabel: d.cityLabel || null,
+          locationType: facilityState.site.locationType || null,
+          workloadKey: facilityState.site.workloadProfile,
+          workloadLabel: d.workloadLabel || null,
+          permitTrack: facilityState.site.permittingTrack || null,
+          phase: facilityState.phase,
+          phaseLabel: PHASES[facilityState.phase - 1] || "READY",
+          completedPhases: [...facilityState.completed],
+          acreage: facilityState.site.acreage || 0,
+          siteMaxMw: d.siteMaxMw || 0,
+          warnings: (d.validationWarnings || []).map((w) => ({ severity: "warn", text: String(w) })),
+          errors: (d.validationErrors || []).map((e) => ({ severity: "error", text: String(e) })),
+        },
+        power: {
+          targetMw: facilityState.power.targetMW || 0,
+          tier: facilityState.power.redundancyTier || null,
+          tierLabel,
+          ups: facilityState.power.upsType || null,
+          upsLabel,
+          firmPct: d.powerPortfolio?.firmPct || 0,
+          variablePct: d.powerPortfolio?.variablePct || 0,
+          powerLead: d.powerLead || null,
+          pue: facilityState.facility.pue || 2.0,
+          uptimeProjection: d.uptime || 0,
+        },
+        compute: {
+          gpuModel: gpuKey || null,
+          gpuLabel: gpu?.label || null,
+          gpusPerRack: facilityState.compute.gpusPerRack || 0,
+          rackCount: facilityState.compute.rackCount || 0,
+          totalGpus: d.totalGpus || 0,
+          inferenceStack: stackKey || null,
+          stackLabel: stack?.label || null,
+          rackKw: d.rackKw || 0,
+        },
+        facilityCons: {
+          developer: facilityState.facility.developerType || null,
+          cooling: facilityState.facility.coolingType || null,
+          coolingLabel: cooling?.label || null,
+          powerArchitecture: facilityState.facility.powerArchitecture || null,
+        },
+        network: {
+          intraNode: intraKey || null,
+          intraNodeLabel: intra?.label || null,
+          fabric: fabricKey || null,
+          fabricLabel: fabric?.label || null,
+        },
+        fiber: {
+          accessType: facilityState.fiber.accessType || null,
+          carriers: [...(facilityState.fiber.carriers || [])],
+          ixpRegion: facilityState.fiber.ixpRegion || null,
+          ixpLabel: d.ixpLabel || null,
+        },
+        dcim: {
+          monitoring: facilityState.dcim?.monitoring || null,
+          maintenance: facilityState.dcim?.maintenance || null,
+          coolingTelemetry: facilityState.dcim?.coolingTelemetry || null,
+        },
+        economics: {
+          totalCapex: facilityState.economics.totalCapex || 0,
+          annualOpex: facilityState.economics.annualOpex || 0,
+        },
+        metrics: {
+          ttftMs: bench.ttft || 0,
+          peakTps: bench.peak || 0,
+          achievedTps: bench.tps || 0,
+          maxConcurrent: bench.max || 0,
+          mfu: bench.mfu || 0,
+          mwDraw: d.mwLive || 0,
+        },
+      };
+
+      window.ForgeState.write(snapshot);
+    } catch (err) {
+      console.warn("[forge-state] snapshot failed:", err);
+    }
   }
 
   function enforceLocks() {

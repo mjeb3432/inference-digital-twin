@@ -8,8 +8,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Comfortaa:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/intro.css?v=20260423e" />
-  <link rel="stylesheet" href="/static/forge.css?v=20260417b" />
+  <link rel="stylesheet" href="/static/intro.css?v=20260425c" />
+  <link rel="stylesheet" href="/static/forge.css?v=20260425a" />
   <link rel="stylesheet" href="/static/global-nav.css?v=20260424" />
 </head>
 <body class="forge-page" data-active-nav="build">
@@ -37,36 +37,72 @@
        dismissable regardless of whether WebGL/WebGPU init.
        ============================================================ -->
   <div id="introOverlay" class="intro-overlay" role="dialog" aria-label="The Forge — intro">
-    <!-- Pure-CSS animated backdrop that always works -->
+    <!-- CSS fallback backdrop (subtle while WebGL2 covers most of it) -->
     <div class="intro-bg" aria-hidden="true">
       <div class="intro-grid"></div>
       <div class="intro-glow intro-glow-amber"></div>
       <div class="intro-glow intro-glow-cyan"></div>
-      <div class="intro-scan-css"></div>
       <div class="intro-vignette"></div>
     </div>
 
-    <!-- Canvas for JS enhancement (used if three.js loads successfully) -->
+    <!-- WebGL2 data-center depth-scan (drop + ripples) -->
     <canvas class="intro-canvas" aria-hidden="true"></canvas>
 
+    <!-- Corner brackets -->
+    <div class="intro-bracket intro-bracket-tl" aria-hidden="true"></div>
+    <div class="intro-bracket intro-bracket-tr" aria-hidden="true"></div>
+    <div class="intro-bracket intro-bracket-bl" aria-hidden="true"></div>
+    <div class="intro-bracket intro-bracket-br" aria-hidden="true"></div>
+
+    <!-- Telemetry HUD panels -->
+    <div class="intro-hud intro-hud-tl" aria-hidden="true">
+      <div class="intro-panel">
+        <div class="intro-panel-label">Facility</div>
+        <div class="intro-panel-value mint">FACILITY-01 // INGEST // LIVE</div>
+      </div>
+      <div class="intro-panel">
+        <div class="intro-panel-label">Mode</div>
+        <div class="intro-panel-value">DEPTH TOMOGRAPHY · INTERACTIVE</div>
+      </div>
+    </div>
+
+    <div class="intro-hud intro-hud-tr" aria-hidden="true">
+      <div class="intro-panel">
+        <div class="intro-panel-label">Scan Plane</div>
+        <div class="intro-panel-value lime" data-intro-hud="depth">0.000</div>
+      </div>
+      <div class="intro-panel">
+        <div class="intro-panel-label">Layer</div>
+        <div class="intro-panel-value" data-intro-hud="layer">FRAME</div>
+      </div>
+    </div>
+
+    <div class="intro-hud intro-hud-bl" aria-hidden="true">
+      <div class="intro-panel" style="min-width: 280px">
+        <div class="intro-panel-label">Telemetry</div>
+        <div class="intro-log-feed" data-intro-hud="log">
+          <div class="log-line"><span class="tag">INIT</span>Depth-map handshake OK</div>
+          <div class="log-line"><span class="tag">BOOT</span>Bringing racks R01..R08 online</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="intro-hud intro-hud-br" aria-hidden="true">
+      <div class="intro-panel">
+        <div class="intro-panel-label">MW Draw</div>
+        <div class="intro-panel-value mint" data-intro-hud="mw">11.48 MW</div>
+      </div>
+    </div>
+
+    <!-- Hero text (centred) -->
     <div class="intro-text">
       <p class="intro-kicker">INFERENCE INFRASTRUCTURE DIGITAL TWIN</p>
       <h1 class="intro-title">
         <span class="word">THE</span>
-        <span class="word">FORGE</span>
+        <span class="word accent">FORGE</span>
       </h1>
-      <p class="intro-subtitle">
-        A live digital twin for AI data centers &mdash; power, cooling, compute, and tokens, end to end.
-      </p>
+      <p class="intro-subtitle">AI Infra Telemetry</p>
     </div>
-
-    <div class="intro-meta" aria-hidden="true">
-      <span>&#9670; INGEST // FACILITY-01</span>
-      <span>SCANNING FACILITY GEOMETRY</span>
-      <span>LIVE DIGITAL TWIN</span>
-    </div>
-
-    <button class="intro-skip" type="button" aria-label="Skip intro">[ SKIP ]</button>
 
     <button class="intro-enter" type="button" aria-label="Enter the facility">
       ENTER THE HALL
@@ -126,17 +162,11 @@
     })();
   </script>
 
-  <!-- three.js (WebGL build) for the optional enhanced effect -->
-  <script type="importmap">
-    {
-      "imports": {
-        "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
-      }
-    }
-  </script>
-
-  <script type="module" src="/static/intro.js?v=20260423e"></script>
-  <script src="/static/forge.js?v=20260417b" defer></script>
+  <!-- WebGL2 intro (vanilla, no three.js dep) -->
+  <script src="/static/intro.js?v=20260425c" defer></script>
+  <!-- Cross-page Forge state bridge (must load before forge.js) -->
+  <script src="/static/forge-state.js?v=20260425a" defer></script>
+  <script src="/static/forge.js?v=20260425a" defer></script>
   <script src="/static/forge-zoom.js?v=20260424a" defer></script>
 
   <div class="desktop-banner" role="status">BEST VIEWED ON DESKTOP (1024PX+)</div>

@@ -389,7 +389,16 @@ input[type="number"], select,
 
 .decision-card.selected strong { color: var(--accent); }
 
-.decision-card.locked { opacity: 0.42; cursor: not-allowed; }
+.decision-card.locked { opacity: 0.42; cursor: not-allowed; pointer-events: none; }
+
+/* Tactile press feedback — only on truly clickable buttons */
+.decision-card:not(.locked):active,
+.confirm-button:not(:disabled):active,
+.ghost-button:active,
+.view-toggle:active,
+.toggle-button:active {
+  transform: translateY(1px);
+}
 
 .option-lock {
   color: var(--warn);
