@@ -721,6 +721,15 @@ function applyForgeOverlay() {
 
 // ─── Scroll-Zoom Handler ──────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
+  /* Build-completion gate — Control Room only opens once the user has
+     finished the 8-phase build in the Forge. */
+  if (window.ForgeState && !window.ForgeState.isBuildComplete()) {
+    window.ForgeState.renderLockOverlayIfNeeded({ pageName: "The Control Room" });
+    window.ForgeState.applyNavGate();
+    return;
+  }
+  if (window.ForgeState) window.ForgeState.applyNavGate();
+
   const container = document.getElementById('isoViewContainer');
 
   container.addEventListener('wheel', (e) => {

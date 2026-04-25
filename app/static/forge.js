@@ -535,12 +535,42 @@
     cacheElements();
     bindEvents();
     hydrateLeftRailWidth();
+
+    /* Resume the user's last build if there is one. The restore is
+       lossy-safe: corrupted JSON or schema mismatches fall back to
+       the default fresh facilityState. */
+    const restored = tryRestoreFullFacilityState();
+
     recalcAll();
     applyAutoBenchmarkCollapse();
     renderBootShell();
     scheduleInitialHydration();
-    pushLog("SESSION STARTED — THE FORGE ONLINE", "muted");
-    emitEvent("SESSION_STARTED", { phase: facilityState.phase, schemaVersion: facilityState.scenario.schemaVersion }, "INFO");
+
+    if (restored) {
+      const phaseLabel = PHASES[facilityState.phase - 1] || `PHASE ${facilityState.phase}`;
+      pushLog(`SESSION RESUMED — ${phaseLabel}`, "good");
+      emitEvent("SESSION_RESUMED", { phase: facilityState.phase, completed: facilityState.completed.length }, "INFO");
+    } else {
+      pushLog("SESSION STARTED — THE FORGE ONLINE", "muted");
+      emitEvent("SESSION_STARTED", { phase: facilityState.phase, schemaVersion: facilityState.scenario.schemaVersion }, "INFO");
+    }
+
+    /* Lock the Dashboard / Control Room nav links until the build
+       is at Phase 8. Re-applied after every recalc via the snapshot
+       publisher below so the lock releases live the moment the user
+       lands at Phase 8. */
+    if (window.ForgeState && typeof window.ForgeState.applyNavGate === "function") {
+      window.ForgeState.applyNavGate();
+    }
+
+    /* Belt-and-braces: flush state on tab close. Persist is synchronous
+       now so this is mostly redundant, but cheap insurance. */
+    window.addEventListener("beforeunload", () => {
+      try {
+        window.localStorage.setItem(FULL_STATE_KEY, JSON.stringify(buildExportPayload()));
+      } catch (_) {}
+    });
+
     startTickers();
   }
 
@@ -610,6 +640,7 @@
       "exportScenarioButton",
       "importScenarioButton",
       "exportEventLogButton",
+      "resetBuildButton",
       "importScenarioInput",
       "helpPopoverLayer",
       "canvasTitle",
@@ -663,6 +694,7 @@
     el.importScenarioButton.addEventListener("click", () => el.importScenarioInput.click());
     el.importScenarioInput.addEventListener("change", onImportScenarioFile);
     el.exportEventLogButton.addEventListener("click", onExportEventLog);
+    if (el.resetBuildButton) el.resetBuildButton.addEventListener("click", onResetBuild);
     el.helpPopoverLayer.addEventListener("click", onHelpLayerClick);
 
     document.addEventListener("click", onDocumentClick);
@@ -1511,6 +1543,61 @@
     pushLog(`SCENARIO EXPORTED (${INTEGER.format(json.length)} BYTES)`, "good");
   }
 
+  function onResetBuild() {
+    /* Confirm before nuking the user's build — the persisted state
+       is the only memory of every phase decision they made. */
+    const ok = window.confirm(
+      "Reset the build?\n\nThis discards every selection across all phases and starts a fresh facility from Phase 1. This cannot be undone."
+    );
+    if (!ok) return;
+
+    /* Reset the in-memory state to a fresh scenario, mirroring the
+       initial facilityState declaration above. We avoid location.reload
+       so the user gets immediate feedback (and we never accidentally
+       re-restore the old state from localStorage). */
+    clearPersistedFacilityState();
+
+    facilityState.scenario = {
+      id: cryptoRandomId(),
+      name: "FORGE SCENARIO",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      schemaVersion: SCHEMA_VERSION,
+    };
+    facilityState.runId = cryptoRandomId();
+    facilityState.events = [];
+    facilityState.phase = 1;
+    facilityState.completed = [];
+    facilityState.site = { locationType: null, cityKey: null, workloadProfile: null, acreage: 25, permittingTrack: null, estimatedPermitCost: 0, permittingMonths: 0, utilityExpansionApproved: false };
+    facilityState.power = { sources: { fom: 100, gas: 0, solar: 0, wind: 0, smr: 0 }, targetMW: null, redundancyTier: null, upsType: null };
+    facilityState.fiber = { accessType: null, carriers: [], ixpRegion: null, latencyMs: 0, monthlyCost: 0 };
+    facilityState.facility = { developerType: null, buildMonths: 0, coolingType: null, powerArchitecture: null, pue: 2 };
+    facilityState.compute = { gpuModel: null, gpusPerRack: 8, rackCount: 0, totalTFLOPS: 0, inferenceStack: null, servingArch: null };
+    facilityState.networking = { intraNode: "nv", fabric: null, nodeCount: 1, externalBandwidth: null, networkingCapex: 0 };
+    facilityState.dcim = { monitoringApproach: null, maintenanceModel: null, coolingTelemetry: null };
+    facilityState.economics = { totalCapex: 0, annualOpex: 0, tco3yr: 0, tco5yr: 0, capexBreakdown: {}, opexBreakdown: {} };
+    facilityState.benchmarks = { ttft: null, tps: null, concurrency: null, mfu: null };
+    facilityState.validation = { errors: [], warnings: [] };
+
+    ui.bench = { model: "70B", prompt: 512, batch: 8, output: 256, conc: 16, precision: "FP8", assumedObservedTps: 0, calibrationMode: false };
+    ui.benchmarkUserOverride = false;
+    ui.mode = VIEW_MODE.FLOOR;
+    ui.immersivePhase8 = false;
+    ui.deploying = { active: false, progress: 0, message: "READY" };
+    ui.tickerCapex = 0;
+    ui.logs = [];
+    ui.hoverInspect = null;
+    ui.selectedInspect = null;
+    closeHelpPopover();
+
+    setDeployState("READY", 0, false);
+    recalcAll();
+    renderAll();
+
+    pushLog("BUILD RESET — STARTING FRESH AT PHASE 1", "warn");
+    emitEvent("BUILD_RESET", { schemaVersion: SCHEMA_VERSION }, "INFO");
+  }
+
   async function onImportScenarioFile(event) {
     const file = event.target.files?.[0];
     event.target.value = "";
@@ -2208,6 +2295,69 @@
     syncMapStats();
     facilityState.scenario.updatedAt = new Date().toISOString();
     publishFacilitySnapshot();
+    persistFullFacilityState();
+    /* Live-update the global-nav lock state — releases the Dashboard
+       and Control Room links the moment the user reaches Phase 8. */
+    if (window.ForgeState && typeof window.ForgeState.applyNavGate === "function") {
+      window.ForgeState.applyNavGate();
+    }
+  }
+
+  /* ============================================================
+   * Full-state persistence: survive page reloads + nav.
+   * The user's build is preserved when they click BUILD/DASHBOARD/
+   * CONTROL ROOM in the global nav, refresh the tab, or close +
+   * reopen the browser.
+   *
+   * Distinct from publishFacilitySnapshot() which writes a small
+   * derived snapshot for sibling pages — this one writes the FULL
+   * scenario in the same shape as the export-JSON file, so we can
+   * round-trip it through migrateScenario() on restore.
+   * ============================================================ */
+  const FULL_STATE_KEY = "forge:facility:full:v1";
+
+  function persistFullFacilityState() {
+    /* Synchronous write — small JSON, O(1ms). Avoids any race between a
+       slider mutation and an immediate nav click, which is exactly the
+       scenario where users reported "the build reset". */
+    try {
+      const payload = buildExportPayload();
+      window.localStorage.setItem(FULL_STATE_KEY, JSON.stringify(payload));
+    } catch (err) {
+      /* Storage can fail in private browsing or when quota is hit */
+      console.warn("[forge] full-state persist failed:", err);
+    }
+  }
+
+  function tryRestoreFullFacilityState() {
+    let raw;
+    try {
+      raw = window.localStorage.getItem(FULL_STATE_KEY);
+    } catch (err) {
+      return false;
+    }
+    if (!raw) return false;
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (err) {
+      console.warn("[forge] persisted state corrupted, clearing:", err);
+      try { window.localStorage.removeItem(FULL_STATE_KEY); } catch (_) {}
+      return false;
+    }
+    try {
+      const migrated = migrateScenario(parsed);
+      applyImportedScenario(migrated);
+      return true;
+    } catch (err) {
+      console.warn("[forge] persisted state failed migration, starting fresh:", err);
+      try { window.localStorage.removeItem(FULL_STATE_KEY); } catch (_) {}
+      return false;
+    }
+  }
+
+  function clearPersistedFacilityState() {
+    try { window.localStorage.removeItem(FULL_STATE_KEY); } catch (_) {}
   }
 
   /* ============================================================

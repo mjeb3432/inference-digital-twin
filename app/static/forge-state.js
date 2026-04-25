@@ -18,8 +18,6 @@
   const STORAGE_KEY = "forge:facility:v1";
   const SCHEMA_VERSION = 1;
 
-  let writeTimer = null;
-
   function read() {
     try {
       const raw = root.localStorage.getItem(STORAGE_KEY);
@@ -33,19 +31,20 @@
   }
 
   function write(snapshot) {
+    /* Synchronous write — needed so that applyNavGate() (called right
+       after) reads the up-to-date snapshot. localStorage.setItem on a
+       ~1 KB JSON is sub-millisecond, so debouncing wasn't worth the
+       UX correctness cost. */
     if (!snapshot) return;
-    if (writeTimer) clearTimeout(writeTimer);
-    writeTimer = setTimeout(() => {
-      try {
-        const payload = JSON.stringify({
-          ...snapshot,
-          meta: { ...(snapshot.meta || {}), savedAt: new Date().toISOString(), schemaVersion: SCHEMA_VERSION },
-        });
-        root.localStorage.setItem(STORAGE_KEY, payload);
-      } catch (err) {
-        console.warn("[forge-state] write failed:", err);
-      }
-    }, 200);
+    try {
+      const payload = JSON.stringify({
+        ...snapshot,
+        meta: { ...(snapshot.meta || {}), savedAt: new Date().toISOString(), schemaVersion: SCHEMA_VERSION },
+      });
+      root.localStorage.setItem(STORAGE_KEY, payload);
+    } catch (err) {
+      console.warn("[forge-state] write failed:", err);
+    }
   }
 
   function clear() {
@@ -73,8 +72,8 @@
   /* Augmented write that also notifies same-tab listeners */
   function writeAndNotify(snapshot) {
     write(snapshot);
-    /* Notify after the debounce so the value listeners read is fresh */
-    setTimeout(() => emit(read()), 220);
+    /* Notify synchronously since write is now synchronous */
+    emit(read());
   }
 
   // ----------------------------------------------------------
@@ -148,6 +147,142 @@
   }
 
   // ----------------------------------------------------------
+  // Build-completion gate — Dashboard and Control Room are only
+  // unlocked once the user reaches Phase 8 (FACILITY ONLINE).
+  // ----------------------------------------------------------
+  function isBuildComplete(snapshot) {
+    snapshot = snapshot ?? read();
+    if (!snapshot) return false;
+    const phase = Number(snapshot.facility?.phase);
+    if (!Number.isFinite(phase)) return false;
+    return phase >= 8;
+  }
+
+  /**
+   * Disable a list of nav <a> links when the build isn't complete.
+   * Adds .locked class, pointer-events: none, prevents click, and
+   * surfaces a tooltip explaining why.
+   *
+   * Call this on every page that renders the global nav (Dashboard,
+   * Control Room, Forge). The Forge link is never locked.
+   */
+  function applyNavGate(opts) {
+    const complete = isBuildComplete();
+    const links = document.querySelectorAll(
+      'a.global-nav-link[data-nav="dashboard"], a.global-nav-link[data-nav="control-room"]'
+    );
+    links.forEach((link) => {
+      if (complete) {
+        link.classList.remove("locked");
+        link.removeAttribute("aria-disabled");
+        link.removeAttribute("title");
+        link.removeAttribute("tabindex");
+      } else {
+        link.classList.add("locked");
+        link.setAttribute("aria-disabled", "true");
+        link.setAttribute("tabindex", "-1");
+        link.title = "Available after the build is complete (reach Phase 8 in The Forge).";
+        if (!link.dataset.gateBound) {
+          link.addEventListener("click", (e) => {
+            if (link.classList.contains("locked")) {
+              e.preventDefault();
+              e.stopPropagation();
+            }
+          });
+          link.dataset.gateBound = "1";
+        }
+      }
+    });
+  }
+
+  /**
+   * Render a full-page lock overlay if the user lands directly on a
+   * gated page (e.g. via URL bar). The overlay explains why and links
+   * back to /forge.
+   */
+  function renderLockOverlayIfNeeded(opts) {
+    if (isBuildComplete()) return false;
+    if (document.getElementById("forgeBuildGate")) return true;
+
+    const pageName = opts?.pageName || "this view";
+    const overlay = document.createElement("div");
+    overlay.id = "forgeBuildGate";
+    overlay.setAttribute("role", "dialog");
+    overlay.setAttribute("aria-label", "Build required");
+    overlay.innerHTML = `
+      <div class="gate-bg" aria-hidden="true"></div>
+      <div class="gate-card">
+        <div class="gate-kicker">[ ACCESS RESTRICTED ]</div>
+        <h2 class="gate-title">Build the facility first</h2>
+        <p class="gate-body">
+          ${pageName} reflects a live data centre. It only unlocks after
+          you complete the 8-phase build in <strong>The Forge</strong>.
+        </p>
+        <a class="gate-cta" href="/forge">OPEN THE FORGE &rsaquo;</a>
+      </div>
+    `;
+
+    /* Inline minimal styles so the overlay works on any page without
+       us editing every page's CSS. */
+    const css = document.createElement("style");
+    css.textContent = `
+      #forgeBuildGate {
+        position: fixed; inset: 0; z-index: 9000;
+        display: flex; align-items: center; justify-content: center;
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+      }
+      #forgeBuildGate .gate-bg {
+        position: absolute; inset: 0;
+        background: rgba(5, 7, 11, 0.92);
+        backdrop-filter: blur(6px);
+        -webkit-backdrop-filter: blur(6px);
+      }
+      #forgeBuildGate .gate-card {
+        position: relative;
+        max-width: 460px; padding: 36px 32px;
+        background: rgba(10, 16, 28, 0.94);
+        border: 1px solid rgba(51, 251, 211, 0.32);
+        box-shadow: 0 0 40px rgba(51, 251, 211, 0.18);
+        text-align: center;
+        color: #f2f7ff;
+      }
+      #forgeBuildGate .gate-kicker {
+        font-size: 10px; letter-spacing: 0.36em;
+        color: #ffb750; margin-bottom: 18px;
+      }
+      #forgeBuildGate .gate-title {
+        font-family: "Comfortaa", sans-serif; font-weight: 700;
+        font-size: 28px; line-height: 1.1; margin: 0 0 14px 0;
+        color: #f2f7ff;
+      }
+      #forgeBuildGate .gate-body {
+        font-family: "Plus Jakarta Sans", sans-serif;
+        font-size: 14px; line-height: 1.55;
+        color: rgba(242, 247, 255, 0.78);
+        margin: 0 0 26px 0;
+      }
+      #forgeBuildGate .gate-body strong { color: #33fbd3; font-weight: 600; }
+      #forgeBuildGate .gate-cta {
+        display: inline-block;
+        padding: 12px 22px;
+        border: 1px solid rgba(51, 251, 211, 0.6);
+        background: rgba(51, 251, 211, 0.1);
+        color: #f2f7ff;
+        font-size: 11px; letter-spacing: 0.28em;
+        text-transform: uppercase; text-decoration: none;
+        transition: background 160ms ease, border-color 160ms ease;
+      }
+      #forgeBuildGate .gate-cta:hover {
+        background: rgba(51, 251, 211, 0.22);
+        border-color: rgba(51, 251, 211, 1);
+      }
+    `;
+    document.head.appendChild(css);
+    document.body.appendChild(overlay);
+    return true;
+  }
+
+  // ----------------------------------------------------------
   // Public API
   // ----------------------------------------------------------
   root.ForgeState = Object.freeze({
@@ -165,5 +300,8 @@
     deriveAvgTemp,
     deriveMwDraw,
     deriveTokensPerSec,
+    isBuildComplete,
+    applyNavGate,
+    renderLockOverlayIfNeeded,
   });
 })(typeof window !== "undefined" ? window : this);

@@ -125,6 +125,29 @@ body[data-active-nav="control-room"] .global-nav-link[data-nav="control-room"] {
   border-bottom-color: var(--accent);
 }
 
+/* Locked state — applied by ForgeState.applyNavGate() when the build
+   isn't complete. The link is dimmed, click-blocked, and shows a
+   tooltip explaining why. Active-state colour does not override this. */
+.global-nav-link.locked,
+body[data-active-nav="dashboard"] .global-nav-link.locked,
+body[data-active-nav="control-room"] .global-nav-link.locked {
+  color: var(--dim2);
+  cursor: not-allowed;
+  opacity: 0.55;
+  border-bottom-color: transparent;
+  pointer-events: auto; /* keep tooltip visible */
+}
+.global-nav-link.locked:hover {
+  color: var(--dim2);
+  border-bottom-color: transparent;
+}
+.global-nav-link.locked::after {
+  content: " 🔒";
+  font-size: 10px;
+  margin-left: 4px;
+  opacity: 0.7;
+}
+
 .global-nav-meta {
   display: flex;
   align-items: center;

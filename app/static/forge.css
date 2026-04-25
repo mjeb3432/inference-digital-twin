@@ -460,6 +460,21 @@ input[type="number"], select,
 .terminal-actions { display: grid; gap: 5px; margin-bottom: 8px; }
 .terminal-actions .ghost-button { width: 100%; text-align: left; }
 
+/* Danger variant — used for destructive actions (e.g. reset build).
+   Keeps the same shape as ghost-button, swaps colour palette only. */
+.ghost-button-danger {
+  border-color: rgba(255, 110, 110, 0.45);
+  color: rgba(255, 200, 200, 0.92);
+}
+.ghost-button-danger:hover {
+  border-color: rgba(255, 110, 110, 0.95);
+  background: rgba(160, 30, 30, 0.18);
+  box-shadow: 0 0 18px rgba(255, 90, 110, 0.28);
+}
+.ghost-button-danger:active {
+  background: rgba(160, 30, 30, 0.32);
+}
+
 .build-log {
   border: 1px solid var(--border);
   background: #050607;
