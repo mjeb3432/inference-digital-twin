@@ -2,15 +2,13 @@
 
 **Simulate before you spend.** The Inference Digital Twin lets infrastructure teams model an AI data center end-to-end — site, power, cooling, compute, networking, and operations — then run inference benchmarks against it before a single rack ships.
 
-Built by [Watt-Bit Research](https://github.com/mjeb3432).
+A web app, built by [Watt-Bit Research](https://github.com/mjeb3432).
 
 ---
 
 ## Quick Start
 
 **Requirements:** [Python 3.11+](https://www.python.org/downloads/) and [Git](https://git-scm.com/downloads).
-
-### Option A — Browser (recommended)
 
 ```bash
 git clone https://github.com/mjeb3432/inference-digital-twin.git
@@ -21,18 +19,7 @@ python run.py
 
 The browser opens automatically. If it doesn't, go to **[http://127.0.0.1:8000/forge](http://127.0.0.1:8000/forge)**.
 
-### Option B — Desktop app (Windows, macOS, Linux)
-
-Runs The Forge in a native window with a Watt-Bit Intelligence title screen followed by The Forge. Manual-dismiss only — press Enter, Space, Esc, or click to continue. Requires PyQt6.
-
-```bash
-pip install -e ".[desktop]"
-python -m desktop.desktop_main
-```
-
-### Option C — Windows one-click
-
-Double-click **`launch.bat`** in the project folder. It creates a virtual environment, installs everything, and launches the desktop app automatically. No terminal needed.
+> **Web-only.** The Forge runs in your browser against the local FastAPI server — there is no native desktop build.
 
 ---
 
@@ -51,25 +38,31 @@ The core of the application is **The Forge**, an interactive 8-phase simulator w
 
 Every prediction is versioned, content-hashed, and traceable through a full provenance chain.
 
+Once a build is complete, two companion views unlock:
+- **Dashboard** (`/dashboard`) — rack-floor view of the facility you just built, with live metrics
+- **Control Room** (`/control-room`) — isometric multi-LOD view (Floor → Rack → Chassis → Tray → GPU)
+
+Both pages read your build from `localStorage`, so they reflect the city, GPU, and rack count you actually configured.
+
 ---
 
 ## How the Simulation Works
 
-The prediction engine is a five-stage module pipeline. Each stage takes the scenario inputs and the upstream stage's output, applies physics-informed coefficients, and passes metrics forward:
+The prediction engine is a five-stage module pipeline. Each stage takes the scenario inputs and the upstream stage's output, applies physics-based formulas grounded in the leading research, and passes metrics forward:
 
 ```
 Hardware → Interconnect → Runtime → Orchestration → Energy
 ```
 
-| Module | Predicts |
-|--------|----------|
-| **Hardware** | Base TTFT, TPOT, TPS, and concurrency from GPU SKU, count, and precision |
-| **Interconnect** | Latency and throughput impact of topology, fabric, and NVLink |
-| **Runtime** | Parallelism gains, batching efficiency, MFU from TP/PP/precision/kernels |
-| **Orchestration** | Placement efficiency, autoscaling impact, saturation-adjusted throughput |
-| **Energy** | Total power draw, cost per hour, carbon emissions from energy mix and PUE |
+| Module | Predicts | Key references |
+|--------|----------|----------------|
+| **Hardware** | Prefill TTFT (compute-bound), decode TPOT (HBM-bandwidth-bound), KV-cache concurrency | Kaplan et al. 2020, Chinchilla, vLLM SOSP 2023, FlashAttention-2 |
+| **Interconnect** | TP all-reduce cost (ring formula), pipeline send/recv hops, fabric bandwidth | Megatron-LM, Patarasuk08, GPipe |
+| **Runtime** | TP/PP efficiency curves, continuous-batching gain, MFU | vLLM Fig. 7, TensorRT-LLM benchmarks, Roofline (Williams 2009) |
+| **Orchestration** | M/M/c queue dynamics, Erlang-C wait time, GPU utilisation | Erlang 1917, Kleinrock 1975 |
+| **Energy** | GPU power vs utilisation (sub-linear DVFS), PUE-vs-load curves, time-matched carbon | NVIDIA Hopper whitepaper, Uptime Institute 2023, Google 24/7 CFE |
 
-All coefficients are stored in `artifacts/coefficients.v1.json` and versioned alongside the code. Reports include SHA-256 content hashes for reproducibility.
+All formulas are calibrated to published vLLM / TensorRT-LLM Llama-3 benchmarks. Coefficients live in `artifacts/coefficients.v1.json` and are versioned alongside the code. Reports include SHA-256 content hashes for reproducibility.
 
 ---
 
@@ -80,17 +73,13 @@ app/               FastAPI backend
   api/             REST API endpoints (/api/runs, /api/reports, /api/health)
   modules/         Simulation pipeline (hardware, interconnect, runtime, orchestration, energy)
   services.py      Lazy-init service layer — UI loads instantly, backend warms in background
-  templates/       Jinja2 HTML (Forge, Explorer, Runs, Artifacts, Provenance)
-  static/          CSS, JS, intro overlay (intro.css / intro.js), geographic data
+  templates/       Jinja2 HTML (Forge, Dashboard, Control Room, Explorer, Runs, Artifacts, Provenance)
+  static/          CSS, JS, WebGL2 intro overlay, geographic data
 contracts/v1/      Versioned JSON Schema contracts
 artifacts/         Deterministic coefficient files
-desktop/           Native desktop wrapper (PyQt6 + QWebEngineView)
-  screens/         Opening animation, logo reveal, main browser window
-  assets/          Sprite sheets, Watt-Bit icons
 web/               Next.js web frontend (React + Tailwind, connects to FastAPI via CORS)
-tests/             39 tests (contracts, modules, integration, frontend regressions)
+tests/             48 tests (contracts, modules, integration, frontend regressions)
 run.py             Start the web server at http://localhost:8000
-launch.bat         Windows one-click launcher (auto-creates venv on first run)
 ```
 
 ---
@@ -104,17 +93,23 @@ pytest
 
 ---
 
-## Web Frontend (Next.js)
+## Optional: Next.js client
 
-A parallel Next.js client lives in `web/`. It connects to the FastAPI backend via CORS.
+A parallel Next.js client lives in `web/` for teams who want a richer SPA. It connects to the FastAPI backend via CORS — the FastAPI server must be running.
 
 ```bash
+# Terminal 1
+python run.py
+
+# Terminal 2
 cd web
 npm install
 npm run dev
 ```
 
-Open **[http://localhost:3000](http://localhost:3000)**. The FastAPI server must also be running (`python run.py` in the project root).
+Then open **[http://localhost:3000](http://localhost:3000)**.
+
+The Jinja templates served from `/forge`, `/dashboard`, and `/control-room` are the canonical UI; the Next.js client is for teams who want to extend it.
 
 ---
 

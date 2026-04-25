@@ -1288,6 +1288,26 @@
       return;
     }
 
+    /* Tutorial visibility toggles — fire on the SKIP TUTORIAL button on
+       the phase-brief card, and on the small "SHOW TUTORIAL" chip that
+       replaces it once hidden. */
+    const skipNode = event.target.closest("[data-action='skip-tutorial']");
+    if (skipNode) {
+      event.stopPropagation();
+      setTutorialHidden(true);
+      pushLog("TUTORIAL HIDDEN — TOGGLE FROM CANVAS CHIP TO RESTORE", "muted");
+      renderCenterCanvas();
+      return;
+    }
+    const showNode = event.target.closest("[data-action='show-tutorial']");
+    if (showNode) {
+      event.stopPropagation();
+      setTutorialHidden(false);
+      pushLog("TUTORIAL RESTORED", "muted");
+      renderCenterCanvas();
+      return;
+    }
+
     const actionNode = event.target.closest("[data-canvas-action]");
     if (!actionNode || ui.mode !== VIEW_MODE.FLOOR) return;
 
@@ -1896,8 +1916,23 @@
     return [];
   }
 
+  /* Tutorial visibility — read by renderPhaseBriefOverlay() and toggled
+     by the SKIP TUTORIAL button on the brief card itself. Persisted to
+     localStorage so the choice survives reloads + nav. */
+  const TUTORIAL_HIDDEN_KEY = "forge:tutorial:hidden:v1";
+  function isTutorialHidden() {
+    try { return window.localStorage.getItem(TUTORIAL_HIDDEN_KEY) === "true"; } catch (_) { return false; }
+  }
+  function setTutorialHidden(hidden) {
+    try {
+      if (hidden) window.localStorage.setItem(TUTORIAL_HIDDEN_KEY, "true");
+      else window.localStorage.removeItem(TUTORIAL_HIDDEN_KEY);
+    } catch (_) {}
+  }
+
   function renderPhaseBriefOverlay() {
     if (facilityState.phase >= 8) return "";
+    if (isTutorialHidden()) return "";
     const brief = PHASE_BRIEFS[facilityState.phase];
     if (!brief) return "";
     const stats = phaseStatsFor(facilityState.phase)
@@ -1905,13 +1940,24 @@
       .join("");
 
     return `
-      <div class="canvas-phase-brief">
+      <div class="canvas-phase-brief" data-tutorial-card>
+        <button type="button" class="phase-brief-skip" data-action="skip-tutorial" aria-label="Skip the tutorial — hide phase guidance cards">SKIP TUTORIAL ×</button>
         <p class="phase-brief-kicker">PHASE ${facilityState.phase} OF 8</p>
         <h3>${esc(brief.title)}</h3>
         <p class="phase-brief-body">${esc(brief.body)}</p>
         <div class="phase-brief-stats">${stats}</div>
         <p class="phase-brief-next">${esc(brief.next)}</p>
       </div>
+    `;
+  }
+
+  /* Tiny "Show tutorial" affordance shown when the tutorial is hidden, so
+     the user can re-enable phase guidance without digging through settings. */
+  function renderTutorialRestoreChip() {
+    if (facilityState.phase >= 8) return "";
+    if (!isTutorialHidden()) return "";
+    return `
+      <button type="button" class="phase-brief-restore" data-action="show-tutorial" title="Show phase guidance cards again">[ ? SHOW TUTORIAL ]</button>
     `;
   }
 
@@ -3217,6 +3263,7 @@
         ${renderFloorToolbar()}
         ${renderLayerPanel()}
         ${renderPhaseBriefOverlay()}
+        ${renderTutorialRestoreChip()}
         <svg id="forge-canvas" class="floor-svg-viewport" viewBox="0 0 ${FLOOR_VIEWBOX.w} ${FLOOR_VIEWBOX.h}" role="img" aria-label="Architectural floor plan">
           <defs>${renderCadDefs()}</defs>
           <rect class="cad-bg" x="0" y="0" width="${FLOOR_VIEWBOX.w}" height="${FLOOR_VIEWBOX.h}"></rect>
