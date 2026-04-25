@@ -366,6 +366,70 @@
   animation: intro-fade-in 900ms ease 2.6s forwards;
 }
 
+/* "Don't show this again" toggle — sits below the ENTER THE HALL button */
+.intro-skip-toggle {
+  position: absolute;
+  left: 50%;
+  bottom: 6px;
+  transform: translateX(-50%);
+  z-index: 10;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgba(127, 160, 192, 0.72);
+  cursor: pointer;
+  user-select: none;
+  pointer-events: auto;
+  opacity: 0;
+  animation: intro-fade-in 600ms ease 2.6s forwards;
+  transition: color 160ms ease;
+}
+.intro-skip-toggle:hover {
+  color: rgba(242, 247, 255, 0.92);
+}
+.intro-skip-toggle input[type="checkbox"] {
+  /* Custom-style the box to match the mint theme. */
+  appearance: none;
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  border: 1px solid rgba(51, 251, 211, 0.55);
+  background: rgba(8, 14, 26, 0.7);
+  cursor: pointer;
+  margin: 0;
+  display: inline-block;
+  position: relative;
+  vertical-align: middle;
+  transition: border-color 160ms ease, background 160ms ease;
+}
+.intro-skip-toggle input[type="checkbox"]:hover {
+  border-color: rgba(51, 251, 211, 0.95);
+}
+.intro-skip-toggle input[type="checkbox"]:checked {
+  background: rgba(51, 251, 211, 0.32);
+  border-color: rgba(51, 251, 211, 1);
+}
+.intro-skip-toggle input[type="checkbox"]:checked::after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 0;
+  width: 4px;
+  height: 8px;
+  border-right: 2px solid #f2f7ff;
+  border-bottom: 2px solid #f2f7ff;
+  transform: rotate(45deg);
+}
+.intro-skip-toggle input[type="checkbox"]:focus-visible {
+  outline: 2px solid #33fbd3;
+  outline-offset: 2px;
+}
+
 /* ============================================================
    Animations
    ============================================================ */
