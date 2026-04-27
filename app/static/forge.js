@@ -282,6 +282,19 @@
     },
   ]);
 
+  /* SITE_CITIES — deployment metro cost & physical-layer parameters.
+   * Each city's `landMult`, `permitCostAdd`, `permitDelta`, `maxMwPerAcre`,
+   * `fiberMiles`, `gridMiles` feed into Phase 1 economics + Phase 8 map.
+   *
+   * Canadian metros calibrated to:
+   *   - StatsCan industrial land sales, 2024
+   *   - JLL Canadian Data Centre Outlook 2025
+   *   - BC Hydro / IESO / AESO grid mix profiles, 2024
+   *   - Cushman & Wakefield 2025 Data Centre Cost Guide (CAD→USD ~0.74)
+   *
+   *  landMult is relative to the global weighted basis (Ashburn ≈ 1.22).
+   *  Vancouver and Toronto land is genuinely expensive; Calgary cheap;
+   *  Montreal sits between. */
   const SITE_CITIES = {
     ashburn: { label: "ASHBURN, VA", region: "US EAST", geo: { lon: -77.49, lat: 39.04 }, fiberMiles: 1, gridMiles: 2, permitDelta: 2, permitCostAdd: 220000, landMult: 1.22, maxMwPerAcre: 2.4 },
     dallas: { label: "DALLAS, TX", region: "US SOUTH", geo: { lon: -96.8, lat: 32.78 }, fiberMiles: 2, gridMiles: 3, permitDelta: 1, permitCostAdd: 160000, landMult: 1.06, maxMwPerAcre: 2.2 },
@@ -289,8 +302,12 @@
     chicago: { label: "CHICAGO, IL", region: "US MIDWEST", geo: { lon: -87.62, lat: 41.88 }, fiberMiles: 2, gridMiles: 3, permitDelta: 2, permitCostAdd: 190000, landMult: 1.14, maxMwPerAcre: 2.3 },
     silicon: { label: "SILICON VALLEY, CA", region: "US WEST", geo: { lon: -121.89, lat: 37.33 }, fiberMiles: 1, gridMiles: 2, permitDelta: 3, permitCostAdd: 340000, landMult: 1.45, maxMwPerAcre: 2.0 },
     atlanta: { label: "ATLANTA, GA", region: "US EAST", geo: { lon: -84.39, lat: 33.75 }, fiberMiles: 3, gridMiles: 4, permitDelta: 1, permitCostAdd: 140000, landMult: 0.98, maxMwPerAcre: 2.0 },
-    montreal: { label: "MONTREAL, QC", region: "CANADA EAST", geo: { lon: -73.57, lat: 45.5 }, fiberMiles: 4, gridMiles: 3, permitDelta: 2, permitCostAdd: 170000, landMult: 1.0, maxMwPerAcre: 1.9 },
     seattle: { label: "SEATTLE, WA", region: "US WEST", geo: { lon: -122.33, lat: 47.61 }, fiberMiles: 2, gridMiles: 4, permitDelta: 2, permitCostAdd: 210000, landMult: 1.18, maxMwPerAcre: 2.05 },
+    /* Canadian metros — 2024 calibration */
+    vancouver: { label: "VANCOUVER, BC", region: "CANADA WEST", geo: { lon: -123.12, lat: 49.28 }, fiberMiles: 4, gridMiles: 3, permitDelta: 3, permitCostAdd: 250000, landMult: 1.55, maxMwPerAcre: 1.85 },
+    calgary:   { label: "CALGARY, AB",   region: "CANADA WEST", geo: { lon: -114.07, lat: 51.05 }, fiberMiles: 5, gridMiles: 4, permitDelta: 1, permitCostAdd: 130000, landMult: 0.92, maxMwPerAcre: 2.5 },
+    toronto:   { label: "TORONTO, ON",   region: "CANADA EAST", geo: { lon: -79.38,  lat: 43.65 }, fiberMiles: 2, gridMiles: 3, permitDelta: 2, permitCostAdd: 200000, landMult: 1.32, maxMwPerAcre: 2.15 },
+    montreal:  { label: "MONTREAL, QC",  region: "CANADA EAST", geo: { lon: -73.57,  lat: 45.50 }, fiberMiles: 4, gridMiles: 3, permitDelta: 2, permitCostAdd: 170000, landMult: 1.00, maxMwPerAcre: 1.90 },
   };
 
   const WORKLOAD_PROFILES = {
@@ -491,6 +508,9 @@
     mapStats: { req: 0, tps: 0, users: 0, ttft: 0, util: 0 },
     animFrame: null,
     animItems: [],
+    /* City combobox UI state — survives recalcAll/renderAll cycles
+     * so the panel doesn't snap shut while the user types. */
+    cityCombo: { open: false, search: "", focusIndex: 0 },
     mapTicker: null,
     lastValidationSig: "",
     pendingCanvasTransition: false,
@@ -863,6 +883,13 @@
     if (!el.helpPopoverLayer.hidden) {
       closeHelpPopover();
     }
+    /* Close the city combobox if the user clicks outside of it. */
+    if (ui.cityCombo.open && !event.target.closest('[data-combo="city"]')) {
+      ui.cityCombo.open = false;
+      ui.cityCombo.search = "";
+      ui.cityCombo.focusIndex = 0;
+      renderLeftDecision();
+    }
   }
 
   function onHelpAnchorViewportChange() {
@@ -897,8 +924,23 @@
         }
         if (facilityState.phase >= 5 && (facilityState.phase < 8 || ui.mode === VIEW_MODE.FLOOR)) {
           const refreshed = updateFloorTelemetryOverlay();
-          if (!refreshed) {
-            renderCenterCanvas();
+          /* If we couldn't patch in place we used to fall back to a
+           * full `renderCenterCanvas()` every 1.4s — which on Phase 6+
+           * meant rebuilding the entire SVG (rack grid + network
+           * paths + travel-dot animations) every tick. That was a major
+           * source of post-Phase-5 lag. Now we just skip — the next
+           * legitimate state change will rebuild it, and the LEDs/labels
+           * on the existing canvas continue to update via the patcher. */
+          if (!refreshed && !ui.continuousRenderPending) {
+            /* One-shot full render only if there's no pending continuous
+             * render already (avoids double-renders during slider drag). */
+            ui.telemetryRetryCount = (ui.telemetryRetryCount || 0) + 1;
+            if (ui.telemetryRetryCount > 4) {
+              ui.telemetryRetryCount = 0;
+              renderCenterCanvas();
+            }
+          } else {
+            ui.telemetryRetryCount = 0;
           }
           if (inspectorNeedsTelemetryRefresh()) {
             renderInspector();
@@ -982,6 +1024,25 @@
         break;
       case "set-site-city":
         facilityState.site.cityKey = value;
+        break;
+      case "city-combo-toggle":
+        ui.cityCombo.open = !ui.cityCombo.open;
+        if (!ui.cityCombo.open) {
+          ui.cityCombo.search = "";
+          ui.cityCombo.focusIndex = 0;
+        }
+        lightweightRender = true;
+        break;
+      case "city-combo-select":
+        facilityState.site.cityKey = value;
+        ui.cityCombo.open = false;
+        ui.cityCombo.search = "";
+        ui.cityCombo.focusIndex = 0;
+        break;
+      case "city-combo-clear":
+        ui.cityCombo.search = "";
+        ui.cityCombo.focusIndex = 0;
+        lightweightRender = true;
         break;
       case "set-workload":
         facilityState.site.workloadProfile = value;
@@ -1077,6 +1138,22 @@
         facilityState.site.cityKey = safeEnum(t.value, Object.keys(SITE_CITIES));
         break;
       }
+      case "city-combo-search": {
+        ui.cityCombo.search = String(t.value || "");
+        ui.cityCombo.focusIndex = 0;
+        /* Lightweight render: only the panel needs to update — left rail
+         * scroll/focus is preserved by the partial render path below. */
+        renderCenterCanvas();
+        renderLeftDecision();
+        /* Restore focus + caret position to the search input. */
+        const next = document.querySelector('.city-combo-search-input');
+        if (next) {
+          next.focus();
+          const len = next.value.length;
+          try { next.setSelectionRange(len, len); } catch (_) {}
+        }
+        return;
+      }
       case "set-acreage": {
         const n = parseBoundedNumber(t.value, 5, 500);
         if (n === null) {
@@ -1138,11 +1215,24 @@
       (action === "set-acreage" || action === "set-source" || action === "set-nodes");
 
     if (continuous) {
-      renderTimeline();
-      renderLeftDecisionStatus();
-      renderLeftMetrics();
-      renderCenterCanvas();
-      renderInspector();
+      /* Throttle the heavy renders to one rAF per frame. Without this,
+       * dragging an `<input type=range>` past Phase 5 fires `input`
+       * events at >60Hz, each running `recalcAll` + `renderCenterCanvas`
+       * — the canvas re-render alone can be 6-8ms when the rack grid is
+       * full, so the user sees visible stutter. The slider value itself
+       * still updates instantly because the input is a native control;
+       * only the derived metrics/canvas wait for the next frame. */
+      if (!ui.continuousRenderPending) {
+        ui.continuousRenderPending = true;
+        requestAnimationFrame(() => {
+          ui.continuousRenderPending = false;
+          renderTimeline();
+          renderLeftDecisionStatus();
+          renderLeftMetrics();
+          renderCenterCanvas();
+          renderInspector();
+        });
+      }
       return;
     }
 
@@ -1273,10 +1363,68 @@
       closeHelpPopover();
       return;
     }
+    /* City combobox keyboard nav — only when open. */
+    if (ui.cityCombo.open) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        ui.cityCombo.open = false;
+        ui.cityCombo.search = "";
+        ui.cityCombo.focusIndex = 0;
+        renderLeftDecision();
+        return;
+      }
+      if (event.key === "ArrowDown" || event.key === "ArrowUp" || event.key === "Enter") {
+        const matches = filteredCityList(ui.cityCombo.search);
+        if (!matches.length) return;
+        if (event.key === "Enter") {
+          event.preventDefault();
+          const pick = matches[clamp(ui.cityCombo.focusIndex, 0, matches.length - 1)];
+          if (pick) {
+            facilityState.site.cityKey = pick.key;
+            ui.cityCombo.open = false;
+            ui.cityCombo.search = "";
+            ui.cityCombo.focusIndex = 0;
+            recalcAll();
+            renderAll();
+            persistFullFacilityState();
+            publishFacilitySnapshot();
+          }
+          return;
+        }
+        event.preventDefault();
+        const dir = event.key === "ArrowDown" ? 1 : -1;
+        ui.cityCombo.focusIndex = (ui.cityCombo.focusIndex + dir + matches.length) % matches.length;
+        renderLeftDecision();
+        return;
+      }
+    }
     if (event.key === "Escape" && ui.immersivePhase8) {
       setImmersivePhase8(false);
       renderCenterCanvas();
     }
+  }
+
+  /**
+   * Cities matching the current search term, in display (region-grouped)
+   * order — used for keyboard navigation so that the focusIndex matches
+   * the order shown in the list. We regroup by region with the same
+   * iteration the renderer uses so ↑/↓ moves the highlight to the next
+   * visible row. */
+  function filteredCityList(search) {
+    const q = (search || "").trim().toLowerCase();
+    const byRegion = new Map();
+    Object.entries(SITE_CITIES).forEach(([key, city]) => {
+      const matches =
+        !q ||
+        city.label.toLowerCase().includes(q) ||
+        city.region.toLowerCase().includes(q);
+      if (!matches) return;
+      if (!byRegion.has(city.region)) byRegion.set(city.region, []);
+      byRegion.get(city.region).push({ key, ...city });
+    });
+    const flat = [];
+    byRegion.forEach((cities) => cities.forEach((c) => flat.push(c)));
+    return flat;
   }
 
   function onCanvasClick(event) {
@@ -2814,6 +2962,117 @@
     `;
   }
 
+  /**
+   * Searchable city combobox.
+   *
+   * The native <select> is hard to scan when there are 11+ cities on a dark
+   * control-room background — the user explicitly asked for an easier
+   * picker. This combobox:
+   *   • Shows the chosen city as a button-shaped trigger with mint border.
+   *   • On click, drops down a panel with a search input + grouped list.
+   *   • Filters by city name OR region name as the user types.
+   *   • Click outside / Escape closes; ↑↓ + Enter for keyboard nav.
+   *
+   * Open/closed/search state lives in `ui.cityCombo` so it survives the
+   * many recalcAll/renderAll cycles triggered by every Forge state change.
+   */
+  function renderCityCombobox() {
+    const selected = SITE_CITIES[facilityState.site.cityKey] || null;
+    const open = !!ui.cityCombo.open;
+    const search = (ui.cityCombo.search || "").trim().toLowerCase();
+
+    /* Group cities by region for easier scanning. Within each region we
+     * preserve the SITE_CITIES insertion order (US → Canada). */
+    const byRegion = new Map();
+    Object.entries(SITE_CITIES).forEach(([key, city]) => {
+      const matches =
+        !search ||
+        city.label.toLowerCase().includes(search) ||
+        city.region.toLowerCase().includes(search);
+      if (!matches) return;
+      if (!byRegion.has(city.region)) byRegion.set(city.region, []);
+      byRegion.get(city.region).push({ key, ...city });
+    });
+
+    const totalMatches = Array.from(byRegion.values()).reduce((n, list) => n + list.length, 0);
+    const focusIdx = clamp(ui.cityCombo.focusIndex, 0, Math.max(0, totalMatches - 1));
+
+    let cursor = 0;
+    const groups = Array.from(byRegion.entries())
+      .map(([region, cities]) => {
+        const rows = cities
+          .map((city) => {
+            const isSelected = facilityState.site.cityKey === city.key;
+            const isFocused = cursor === focusIdx;
+            cursor += 1;
+            return `
+              <button
+                type="button"
+                class="city-combo-row ${isSelected ? "selected" : ""} ${isFocused ? "focused" : ""}"
+                role="option"
+                aria-selected="${isSelected ? "true" : "false"}"
+                data-action="city-combo-select"
+                data-value="${city.key}"
+                data-inspect-kind="site-city"
+                data-inspect-key="${city.key}">
+                <span class="city-combo-row-name">${esc(city.label)}</span>
+                <span class="city-combo-row-meta">${esc(city.region)} · ${city.maxMwPerAcre.toFixed(1)} MW/AC · ${city.landMult.toFixed(2)}× LAND</span>
+              </button>`;
+          })
+          .join("");
+        return `
+          <div class="city-combo-group">
+            <div class="city-combo-group-label">${esc(region)}</div>
+            ${rows}
+          </div>`;
+      })
+      .join("");
+
+    const empty = totalMatches === 0
+      ? `<div class="city-combo-empty">No matches for &ldquo;${esc(ui.cityCombo.search || "")}&rdquo;</div>`
+      : "";
+
+    const triggerLabel = selected
+      ? `<span class="city-combo-trigger-name">${esc(selected.label)}</span>
+         <span class="city-combo-trigger-region">${esc(selected.region)} · ${selected.maxMwPerAcre.toFixed(2)} MW/AC</span>`
+      : `<span class="city-combo-trigger-name placeholder">SELECT A CITY</span>
+         <span class="city-combo-trigger-region">CHOOSE A DEPLOYMENT METRO</span>`;
+
+    return `
+      <div class="city-combo ${open ? "open" : ""}" data-combo="city">
+        <button
+          type="button"
+          class="city-combo-trigger"
+          aria-haspopup="listbox"
+          aria-expanded="${open ? "true" : "false"}"
+          data-action="city-combo-toggle">
+          <span class="city-combo-trigger-text">${triggerLabel}</span>
+          <span class="city-combo-trigger-chevron" aria-hidden="true">${open ? "▴" : "▾"}</span>
+        </button>
+        <div class="city-combo-panel" ${open ? "" : "hidden"} role="dialog" aria-label="Select deployment city">
+          <div class="city-combo-search-row">
+            <span class="city-combo-search-icon" aria-hidden="true">⌕</span>
+            <input
+              type="text"
+              class="city-combo-search-input"
+              placeholder="SEARCH CITY OR REGION…"
+              autocomplete="off"
+              spellcheck="false"
+              data-action="city-combo-search"
+              value="${esc(ui.cityCombo.search || "")}" />
+            ${ui.cityCombo.search ? `<button type="button" class="city-combo-search-clear" data-action="city-combo-clear" aria-label="Clear search">×</button>` : ""}
+          </div>
+          <div class="city-combo-list" role="listbox" aria-label="Available cities">
+            ${groups}
+            ${empty}
+          </div>
+          <div class="city-combo-foot">
+            <span class="city-combo-foot-hint">↑↓ NAVIGATE · ENTER SELECT · ESC CLOSE</span>
+          </div>
+        </div>
+      </div>`;
+  }
+
   function decisionPhase1() {
     const locCards = Object.entries(LOCATION).map(([key, item]) => decisionCard({
       action: "set-location",
@@ -2830,10 +3089,11 @@
       inspectKey: key,
     })).join("");
 
-    const cityOptions = Object.entries(SITE_CITIES)
-      .sort((a, b) => a[1].label.localeCompare(b[1].label))
-      .map(([key, city]) => `<option value="${key}" ${facilityState.site.cityKey === key ? "selected" : ""}>${city.label} (${city.region})</option>`)
-      .join("");
+    /* Build the searchable city combobox markup. We render it on every
+     * panel re-render so the chosen city's metadata stays in sync, but
+     * the open/closed and search state live in `ui.cityCombo` so they
+     * survive cycles. */
+    const cityComboHtml = renderCityCombobox();
 
     const workloadCards = Object.entries(WORKLOAD_PROFILES).map(([key, item]) => decisionCard({
       action: "set-workload",
@@ -2876,14 +3136,7 @@
       </div>
       <div class="decision-block">
         <h3 class="decision-heading">DECISION 2 — DEPLOYMENT CITY ${helpPopover("SELECT THE ACTUAL CITY WHERE THIS FACILITY WILL OPERATE. CITY SETTINGS UPDATE MAP LOCATION, FIBER DISTANCE, AND SITE DENSITY.")}</h3>
-        <div class="inline-controls one">
-          <label>SITE CITY
-            <select data-action="set-site-city" data-inspect-kind="site-city" data-inspect-key="${facilityState.site.cityKey || ""}">
-              <option value="">SELECT CITY</option>
-              ${cityOptions}
-            </select>
-          </label>
-        </div>
+        ${cityComboHtml}
         ${selectedCity ? `<div class="info-callout">REGION: ${selectedCity.region} | FIBER EDGE: ${selectedCity.fiberMiles} MI | GRID EDGE: ${selectedCity.gridMiles} MI | DENSITY: ${selectedCity.maxMwPerAcre.toFixed(2)} MW/ACRE</div>` : ""}
       </div>
       <div class="decision-block">
@@ -4039,6 +4292,18 @@
     const layer = el.constructionCanvas.querySelector("#travelDots");
     if (!svg || !layer) return;
 
+    /* Helper — compute the path length ONCE (the SVG geometry doesn't
+     * change between frames) and stash it on the item. `getTotalLength()`
+     * on a complex `<path>` is non-trivial — it walks the segment list,
+     * resolves each command's length, and caches inside the engine. But
+     * calling it 30+ times per frame at 60Hz across many paths after
+     * Phase 6 was the dominant cost in the lag profiles. Caching cuts
+     * the per-frame cost from O(N · seglen) to O(N · 1). */
+    function withMeasured(path) {
+      const len = path.getTotalLength();
+      return { path, len };
+    }
+
     if (mode === VIEW_MODE.FLOOR) {
       const paths = [...svg.querySelectorAll(".net-path")];
       paths.forEach((path, idx) => {
@@ -4046,7 +4311,8 @@
         dot.setAttribute("r", "2.1");
         dot.setAttribute("class", "travel-dot");
         layer.appendChild(dot);
-        ui.animItems.push({ type: "network", path, dot, speed: Number(path.dataset.speed || 0.06), offset: idx * 0.15, cityId: null, prev: 0 });
+        const m = withMeasured(path);
+        ui.animItems.push({ type: "network", path: m.path, len: m.len, dot, speed: Number(path.dataset.speed || 0.06), offset: idx * 0.15, cityId: null, prev: 0 });
       });
     }
 
@@ -4057,7 +4323,8 @@
         dot.setAttribute("r", "2.4");
         dot.setAttribute("class", "travel-dot");
         layer.appendChild(dot);
-        ui.animItems.push({ type: "request", path, dot, speed: Number(path.dataset.speed || 0.05), offset: idx * 0.21, cityId: Number(path.dataset.city), prev: 0, delay: 0 });
+        const m = withMeasured(path);
+        ui.animItems.push({ type: "request", path: m.path, len: m.len, dot, speed: Number(path.dataset.speed || 0.05), offset: idx * 0.21, cityId: Number(path.dataset.city), prev: 0, delay: 0 });
       });
 
       [...svg.querySelectorAll(".res-arc")].forEach((path, idx) => {
@@ -4065,22 +4332,29 @@
         dot.setAttribute("r", "2.4");
         dot.setAttribute("class", "travel-dot response");
         layer.appendChild(dot);
-        ui.animItems.push({ type: "response", path, dot, speed: Number(path.dataset.speed || 0.045), offset: idx * 0.17, cityId: Number(path.dataset.city), prev: 0, delay: ttftDelay });
+        const m = withMeasured(path);
+        ui.animItems.push({ type: "response", path: m.path, len: m.len, dot, speed: Number(path.dataset.speed || 0.045), offset: idx * 0.17, cityId: Number(path.dataset.city), prev: 0, delay: ttftDelay });
       });
     }
+
+    /* Bail early if we have no work to do — avoids scheduling rAF
+     * callbacks that just return. This matters at Phase 5 where the
+     * floor view has no `.net-path` elements yet. */
+    if (!ui.animItems.length) return;
 
     const start = performance.now();
     const animate = (time) => {
       const elapsed = time - start;
-      ui.animItems.forEach((item) => {
-        const len = item.path.getTotalLength();
-        if (!len) return;
+      for (let i = 0; i < ui.animItems.length; i += 1) {
+        const item = ui.animItems[i];
+        const len = item.len;
+        if (!len) continue;
 
         let progress = (elapsed * item.speed / 1000 + item.offset) % 1;
         if (item.type === "response") {
           if (elapsed < item.delay) {
             item.dot.setAttribute("opacity", "0");
-            return;
+            continue;
           }
           progress = ((elapsed - item.delay) * item.speed / 1000 + item.offset) % 1;
           item.dot.setAttribute("opacity", "1");
@@ -4095,7 +4369,7 @@
         }
 
         item.prev = progress;
-      });
+      }
 
       ui.animFrame = requestAnimationFrame(animate);
     };

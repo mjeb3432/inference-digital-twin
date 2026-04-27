@@ -42,7 +42,12 @@ def test_telemetry_tick_prefers_incremental_overlay_patch() -> None:
     body = between(source, "function startTickers()", "function inspectorNeedsTelemetryRefresh()")
 
     assert "const refreshed = updateFloorTelemetryOverlay();" in body
-    assert "if (!refreshed)" in body
+    # The incremental-patch-first branch must still gate the full render.
+    # We accept either the original `if (!refreshed)` form or the newer
+    # `if (!refreshed && ...)` retry-throttled form added in 2026-Q2 to
+    # combat post-Phase-5 lag (full re-render only after several patch
+    # failures in a row).
+    assert ("if (!refreshed)" in body) or ("if (!refreshed &&" in body)
     assert "renderCenterCanvas();" in body
 
 

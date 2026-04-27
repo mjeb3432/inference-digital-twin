@@ -24,6 +24,43 @@ let currentLOD = 0;
 let selectedRack = 'B-03';
 const lodLevels = ['FLOOR', 'RACK', 'CHASSIS', 'TRAY', 'GPU'];
 
+/* Per-rack operational state, keyed by rack id (e.g. "A-01").
+ * `power`: "on" | "off"
+ * `rebootingUntil`: timestamp ms — non-null means still rebooting
+ * `benchmarkingUntil`: timestamp ms — non-null means a benchmark in progress */
+const rackOps = new Map();
+
+/* Returns (or initializes) the ops record for a rack. */
+function getRackOps(rackId) {
+  if (!rackOps.has(rackId)) {
+    rackOps.set(rackId, { power: 'on', rebootingUntil: null, benchmarkingUntil: null });
+  }
+  return rackOps.get(rackId);
+}
+
+/* Effective status for the rack — combines its physical CPU/temp telemetry
+ * with operator-set power state and any in-flight reboot/benchmark. */
+function effectiveStatus(rack) {
+  const ops = getRackOps(rack.id);
+  if (ops.power === 'off') return 'offline';
+  const now = Date.now();
+  if (ops.rebootingUntil && now < ops.rebootingUntil) return 'rebooting';
+  if (ops.benchmarkingUntil && now < ops.benchmarkingUntil) return 'benchmarking';
+  return rack.status; // healthy / warn / critical from the underlying telemetry
+}
+
+/* Map status → LED hex color, kept in one place so we don't drift. */
+function statusToLed(status) {
+  switch (status) {
+    case 'offline':       return '#5C626B';   // grey
+    case 'rebooting':     return '#FFD166';   // amber
+    case 'benchmarking':  return '#6DD6FF';   // sky
+    case 'critical':      return '#FF6B6B';
+    case 'warn':          return '#FFD166';
+    default:              return '#7BFF9E';
+  }
+}
+
 // ─── Forge snapshot integration ─────────────────────────────────────
 function getSnapshot() {
   try { return window.ForgeState ? window.ForgeState.read() : null; } catch (_) { return null; }
@@ -144,15 +181,21 @@ function renderFloorView() {
 
 function drawRackBlock(svg, x, y, rack, lod) {
   const size = 60;
-  const ledColor = rack.status === 'critical' ? '#FF6B6B' : rack.status === 'warn' ? '#FFD166' : '#7BFF9E';
+  const status = effectiveStatus(rack);
+  const ledColor = statusToLed(status);
+  const offline = status === 'offline';
+  const rebooting = status === 'rebooting';
+  const benchmarking = status === 'benchmarking';
 
-  // Rack body
+  // Rack body — fade when offline so the user can tell at a glance
+  // which racks have been operator-disabled.
   const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
   rect.setAttribute('x', x);
   rect.setAttribute('y', y);
   rect.setAttribute('width', size);
   rect.setAttribute('height', size);
-  rect.setAttribute('fill', '#171A1F');
+  rect.setAttribute('fill', offline ? '#0c0e11' : '#171A1F');
+  if (offline) rect.setAttribute('opacity', '0.45');
   rect.setAttribute('stroke', rack.id === selectedRack ? '#33FBD3' : '#23272D');
   rect.setAttribute('stroke-width', rack.id === selectedRack ? '2' : '1');
   rect.setAttribute('rx', '2');
@@ -167,20 +210,33 @@ function drawRackBlock(svg, x, y, rack, lod) {
   led.setAttribute('cy', y + 6);
   led.setAttribute('r', '3');
   led.setAttribute('fill', ledColor);
-  led.setAttribute('class', 'iso-led');
+  led.setAttribute('class', 'iso-led' + (rebooting || benchmarking ? ' iso-led-pulse' : ''));
   svg.appendChild(led);
 
-  // Label
+  // Rack ID label (top centre of cell)
   const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
   label.setAttribute('x', x + size / 2);
-  label.setAttribute('y', y + size / 2);
-  label.setAttribute('fill', '#33FBD3');
+  label.setAttribute('y', y + size / 2 - 4);
+  label.setAttribute('fill', offline ? '#5C626B' : '#33FBD3');
   label.setAttribute('font-size', '11');
   label.setAttribute('font-family', 'monospace');
   label.setAttribute('text-anchor', 'middle');
   label.setAttribute('dy', '0.3em');
   label.textContent = rack.id;
   svg.appendChild(label);
+
+  // Power draw subtitle — shows the rack's per-rack kW so the floor view
+  // is clearly tied to the user's MW build, not just decorative.
+  const powerLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+  powerLabel.setAttribute('x', x + size / 2);
+  powerLabel.setAttribute('y', y + size / 2 + 10);
+  powerLabel.setAttribute('fill', offline ? '#3A3F47' : '#7BFF9E');
+  powerLabel.setAttribute('font-size', '8');
+  powerLabel.setAttribute('font-family', 'monospace');
+  powerLabel.setAttribute('text-anchor', 'middle');
+  powerLabel.setAttribute('opacity', '0.85');
+  powerLabel.textContent = offline ? '— kW' : `${rackPowerKw(rack).toFixed(1)} kW`;
+  svg.appendChild(powerLabel);
 
   // Clickable
   rect.addEventListener('click', () => selectRack(rack.id));
@@ -651,22 +707,104 @@ function updateRackInspector() {
 
   document.getElementById('ctrlInspectorTitle').textContent = `RACK-${rack.id}`;
 
+  /* Derive metrics from the actual Forge snapshot when present.
+   * Each rack inherits the cluster-wide GPU model and gpus/rack
+   * but adds a small deterministic jitter (seeded by rack id) so
+   * different racks don't all read identically. */
+  const ops = getRackOps(rack.id);
+  const snap = getSnapshot();
+  const seed = rackSeed(rack.id);
+
+  // Power-per-rack: derive from the user's MW target / rack count.
+  let perRackKw = 3.6;
+  if (snap && window.ForgeState) {
+    const mw = window.ForgeState.deriveMwDraw(snap);
+    const racks = window.ForgeState.deriveRackCount(snap) || 1;
+    perRackKw = (mw * 1000) / racks;
+  }
+
+  // Temperature: derive from cooling type + small per-rack offset
+  let baseTempC = 24;
+  if (snap?.facilityCons?.cooling) {
+    const c = String(snap.facilityCons.cooling).toLowerCase();
+    if (c.includes('immersion')) baseTempC = 18;
+    else if (c.includes('liquid') || c.includes('d2c')) baseTempC = 22;
+    else baseTempC = 28; // air
+  }
+  const rackTempC = clamp(baseTempC + (seed - 0.5) * 4, baseTempC - 2, baseTempC + 6);
+
+  // CPU Util: drive from snapshot MFU + per-rack jitter so it ranges
+  // ~30-95 instead of being purely random
+  const baselineUtil = clamp(((rack.cpu / 100) * 100) || 60, 25, 95);
+
+  let valOps = 'ONLINE';
+  let valOpsClass = '';
+  const status = effectiveStatus(rack);
+  if (status === 'offline') { valOps = 'POWER OFF'; valOpsClass = 'critical'; }
+  else if (status === 'rebooting') { valOps = 'REBOOTING…'; valOpsClass = 'warn'; }
+  else if (status === 'benchmarking') { valOps = 'BENCH RUNNING'; valOpsClass = 'info'; }
+  else if (status === 'critical') { valOps = 'CRITICAL'; valOpsClass = 'critical'; }
+  else if (status === 'warn') { valOps = 'WARN'; valOpsClass = 'warn'; }
+
   const metrics = {
-    'CPU Util': `${rack.cpu}%`,
-    'RAM Util': `${Math.round(rng.range(80, 99))}%`,
-    Power: `${rng.range(2.5, 4.5).toFixed(1)} kW`,
-    Temp: `${Math.round(rng.range(75, 87))}°C`,
-    Uptime: `${Math.round(rng.range(100, 300))}d`,
-    'Last Ping': `${Math.round(rng.range(1, 10))}ms`,
+    'CPU Util': status === 'offline' ? '—' : `${Math.round(baselineUtil)}%`,
+    'RAM Util': status === 'offline' ? '—' : `${Math.round(82 + seed * 14)}%`,
+    Power:     status === 'offline' ? '0.0 kW' : `${perRackKw.toFixed(1)} kW`,
+    Temp:      status === 'offline' ? '—' : `${rackTempC.toFixed(1)}°C`,
+    Uptime:    `${Math.round(80 + seed * 220)}d`,
+    'Last Ping': status === 'offline' ? '— ms' : `${(0.4 + seed * 5).toFixed(1)}ms`,
     'GPU Model': GPU_LABEL,
     'GPU Count': String(GPUS_PER_RACK),
-    Firmware: '2024.Q1.19',
+    Firmware:  '2026.Q1.19',
   };
 
   Object.entries(metrics).forEach(([key, val]) => {
     const el = document.getElementById(`det${key.replace(/\s+/g, '')}`);
     if (el) el.textContent = val;
   });
+
+  // Sync power toggle group to current state
+  document.querySelectorAll('#powerToggleGroup .toggle-btn').forEach((b) => {
+    b.classList.toggle('active', b.dataset.state === ops.power);
+  });
+
+  // Asset preview overlay
+  const overlay = document.querySelector('.asset-preview .preview-overlay');
+  if (overlay) {
+    overlay.textContent = valOps;
+    overlay.dataset.severity = valOpsClass || 'good';
+  }
+}
+
+/* Tiny deterministic seed so each rack's per-frame jitter is stable
+ * across renders (otherwise CPU%/Temp would jump every time the
+ * inspector re-rendered, which felt twitchy). */
+function rackSeed(id) {
+  let h = 0;
+  for (let i = 0; i < id.length; i += 1) {
+    h = (h * 31 + id.charCodeAt(i)) | 0;
+  }
+  // map to [0,1)
+  const v = Math.abs(Math.sin(h * 0.31415));
+  return v - Math.floor(v);
+}
+
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+/* Per-rack kW draw — derived from MW target / rack count, with the same
+ * deterministic per-rack jitter we use elsewhere so different racks show
+ * slightly different values. Kept in one place so floor view + inspector
+ * never disagree. */
+function rackPowerKw(rack) {
+  const snap = getSnapshot();
+  let basePerRack = 3.6;
+  if (snap && window.ForgeState) {
+    const mw = window.ForgeState.deriveMwDraw(snap);
+    const racks = window.ForgeState.deriveRackCount(snap) || 1;
+    basePerRack = (mw * 1000) / racks;
+  }
+  const seed = rackSeed(rack.id);
+  return clamp(basePerRack * (0.92 + seed * 0.18), 0.4, basePerRack * 1.25);
 }
 
 // ─── Apply forge snapshot to static page chrome ────────────────────
@@ -685,10 +823,11 @@ function applyForgeOverlay() {
   const dcLabelNodes = document.querySelectorAll('.tree-node.selected .tree-label');
   dcLabelNodes.forEach((el) => { el.textContent = dcCode; });
 
-  // Quick filters: status counts derived from rack list
-  const onlineCount = ISO_RACKS.filter((r) => r.status === 'online').length;
-  const warnCount = ISO_RACKS.filter((r) => r.status === 'warn').length;
-  const criticalCount = ISO_RACKS.filter((r) => r.status === 'critical').length;
+  // Quick filters: status counts derived from EFFECTIVE rack status,
+  // which factors in operator power-off / reboot / benchmark states.
+  const onlineCount   = ISO_RACKS.filter((r) => effectiveStatus(r) === 'online' || effectiveStatus(r) === 'healthy').length;
+  const warnCount     = ISO_RACKS.filter((r) => effectiveStatus(r) === 'warn').length;
+  const criticalCount = ISO_RACKS.filter((r) => effectiveStatus(r) === 'critical' || effectiveStatus(r) === 'offline').length;
   const so = document.getElementById('statusOnline');
   const sw = document.getElementById('statusWarn');
   const sc = document.getElementById('statusCritical');
@@ -763,4 +902,255 @@ document.addEventListener('DOMContentLoaded', () => {
   if (window.ForgeState && typeof window.ForgeState.subscribe === 'function') {
     window.ForgeState.subscribe(() => refreshFromSnapshot());
   }
+
+  // Wire the operational control buttons (ON/OFF, Reboot, Benchmark, Open Console)
+  wireControlActions();
+
+  // Wire the console modal: input handling, command echo, close on backdrop / Escape
+  wireConsoleModal();
 });
+
+// ──────────────────────────────────────────────────────────────────────
+// Operational control wiring — turn the previously-decorative buttons
+// into actually-working controls that change the rack state and
+// reflect that change in the LOD view + inspector.
+// ──────────────────────────────────────────────────────────────────────
+function wireControlActions() {
+  const root = document.querySelector('.control-actions');
+  if (!root) return;
+
+  root.addEventListener('click', (event) => {
+    const btn = event.target.closest('[data-action]');
+    if (!btn) return;
+    const action = btn.dataset.action;
+    const rack = ISO_RACKS.find((r) => r.id === selectedRack);
+    if (!rack) return;
+    const ops = getRackOps(rack.id);
+
+    switch (action) {
+      case 'set-power': {
+        const wantOn = btn.dataset.state === 'on';
+        ops.power = wantOn ? 'on' : 'off';
+        ops.rebootingUntil = null;
+        ops.benchmarkingUntil = null;
+        document.querySelectorAll('#powerToggleGroup .toggle-btn').forEach((b) => {
+          b.classList.toggle('active', b.dataset.state === ops.power);
+        });
+        flashStatus(wantOn
+          ? `RACK-${rack.id} powered ON`
+          : `RACK-${rack.id} powered OFF — telemetry stream paused`);
+        updateLODView();
+        updateRackInspector();
+        break;
+      }
+      case 'reboot': {
+        if (ops.power === 'off') {
+          flashStatus('Rack is OFF — power on first', 'warn');
+          break;
+        }
+        ops.rebootingUntil = Date.now() + 2500;
+        btn.classList.add('flash');
+        setTimeout(() => btn.classList.remove('flash'), 220);
+        flashStatus(`RACK-${rack.id} rebooting… (BIOS POST → driver init → fabric handshake)`);
+        updateLODView();
+        updateRackInspector();
+        // Clear after timeout, then refresh
+        setTimeout(() => {
+          ops.rebootingUntil = null;
+          flashStatus(`RACK-${rack.id} back online`, 'good');
+          updateLODView();
+          updateRackInspector();
+        }, 2600);
+        break;
+      }
+      case 'benchmark': {
+        if (ops.power === 'off') {
+          flashStatus('Rack is OFF — power on first', 'warn');
+          break;
+        }
+        ops.benchmarkingUntil = Date.now() + 3500;
+        btn.classList.add('flash');
+        setTimeout(() => btn.classList.remove('flash'), 220);
+        runRackBenchmark(rack);
+        updateLODView();
+        updateRackInspector();
+        setTimeout(() => {
+          ops.benchmarkingUntil = null;
+          updateLODView();
+          updateRackInspector();
+        }, 3600);
+        break;
+      }
+      case 'open-console': {
+        if (ops.power === 'off') {
+          flashStatus('Rack is OFF — cannot open console', 'warn');
+          break;
+        }
+        openConsole(rack);
+        break;
+      }
+      default:
+        break;
+    }
+  });
+}
+
+// Briefly show a status message under the button group (auto-hides after 2.5s).
+let statusFlashTimer = null;
+function flashStatus(msg, severity) {
+  const el = document.getElementById('actionStatus');
+  if (!el) return;
+  el.textContent = msg;
+  el.dataset.severity = severity || 'info';
+  el.hidden = false;
+  if (statusFlashTimer) clearTimeout(statusFlashTimer);
+  statusFlashTimer = setTimeout(() => {
+    el.hidden = true;
+  }, 2500);
+}
+
+// Animate a fake benchmark TPS counter for a few seconds. We tween from 0
+// up to roughly the snapshot-derived TPS divided by rack count, with a
+// small jitter so the bar feels alive.
+function runRackBenchmark(rack) {
+  const strip = document.getElementById('benchmarkStrip');
+  const tpsEl = document.getElementById('benchmarkStripTps');
+  const fillEl = document.getElementById('benchmarkStripFill');
+  if (!strip || !tpsEl || !fillEl) return;
+
+  const snap = getSnapshot();
+  let target = 18000; // sane fallback
+  if (snap && window.ForgeState) {
+    const total = window.ForgeState.deriveTokensPerSec(snap);
+    const rackCount = window.ForgeState.deriveRackCount(snap) || 1;
+    target = Math.max(800, Math.round(total / rackCount));
+  }
+  strip.hidden = false;
+  fillEl.style.width = '0%';
+  tpsEl.textContent = '0 TPS';
+
+  const start = performance.now();
+  const dur = 3500;
+  function step(now) {
+    const t = Math.min(1, (now - start) / dur);
+    const eased = 1 - Math.pow(1 - t, 2.4);
+    const live = Math.round(target * eased * (0.94 + Math.random() * 0.12));
+    tpsEl.textContent = `${live.toLocaleString()} TPS`;
+    fillEl.style.width = `${(eased * 100).toFixed(1)}%`;
+    if (t < 1) {
+      requestAnimationFrame(step);
+    } else {
+      flashStatus(`Benchmark complete — ${target.toLocaleString()} tokens/s sustained`, 'good');
+      // Hide strip after a short pause so the user can see the final value.
+      setTimeout(() => { strip.hidden = true; }, 2200);
+    }
+  }
+  requestAnimationFrame(step);
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Console modal — purely cosmetic SSH-style transcript that runs a few
+// fake commands and accepts free-typed input. Useful as a "tangible"
+// affordance for operators looking at the rack in the control room.
+// ──────────────────────────────────────────────────────────────────────
+function openConsole(rack) {
+  const modal = document.getElementById('consoleModal');
+  const stream = document.getElementById('consoleStream');
+  const title = document.getElementById('consoleTitle');
+  const input = document.getElementById('consoleInput');
+  if (!modal || !stream || !input || !title) return;
+
+  title.textContent = `root@RACK-${rack.id} ~`;
+  stream.textContent = '';
+  modal.hidden = false;
+
+  // Print a believable boot sequence
+  const snap = getSnapshot();
+  const gpuLabel = (snap && window.ForgeState ? window.ForgeState.deriveGpuModel(snap) : 'H100 SXM5');
+  const gpuCount = Number(snap?.compute?.gpusPerRack) || 8;
+  const cityLabel = (snap && window.ForgeState ? window.ForgeState.formatCityLabel(snap) : 'TOR-DC-01');
+
+  const lines = [
+    `Last login: ${new Date().toUTCString()} from 10.42.0.1`,
+    `Welcome to NVIDIA HGX ${gpuLabel} chassis`,
+    `Site: ${cityLabel}`,
+    ``,
+    `$ uname -a`,
+    `Linux rack-${rack.id.toLowerCase()} 6.6.32-x86_64-cuda #1 SMP PREEMPT_DYNAMIC Tue Mar  4 18:22:11 UTC 2026 x86_64 GNU/Linux`,
+    `$ uptime`,
+    `${new Date().toLocaleTimeString()} up 187 days,  4:11,  3 users,  load average: ${(0.6 + Math.random() * 0.4).toFixed(2)}, ${(0.5 + Math.random() * 0.4).toFixed(2)}, ${(0.4 + Math.random() * 0.4).toFixed(2)}`,
+    `$ nvidia-smi --query-gpu=index,name,utilization.gpu,memory.used --format=csv,noheader`,
+    ...Array.from({ length: gpuCount }).map((_, i) =>
+      `${i}, NVIDIA ${gpuLabel}, ${Math.round(60 + Math.random() * 30)}%, ${Math.round(60 + Math.random() * 18)} GiB`
+    ),
+    ``,
+    `Type a command (echo only — this is a read-only operator console).`,
+  ];
+
+  // Type out the lines with a small stagger so it feels alive.
+  appendConsoleLines(stream, lines);
+
+  // Focus the input
+  setTimeout(() => input.focus(), 60);
+}
+
+function appendConsoleLines(stream, lines) {
+  let i = 0;
+  function tick() {
+    if (i >= lines.length) return;
+    stream.textContent += lines[i] + '\n';
+    stream.scrollTop = stream.scrollHeight;
+    i += 1;
+    setTimeout(tick, 35);
+  }
+  tick();
+}
+
+function wireConsoleModal() {
+  const modal = document.getElementById('consoleModal');
+  const input = document.getElementById('consoleInput');
+  const stream = document.getElementById('consoleStream');
+  if (!modal || !input || !stream) return;
+
+  // Close handlers (backdrop, X button, Escape)
+  modal.addEventListener('click', (e) => {
+    const close = e.target.closest('[data-action="close-console"]');
+    if (close) modal.hidden = true;
+  });
+  document.addEventListener('keydown', (e) => {
+    if (!modal.hidden && e.key === 'Escape') {
+      modal.hidden = true;
+    }
+  });
+
+  // Echo typed commands with a few hardcoded responses
+  input.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    const cmd = input.value.trim();
+    input.value = '';
+    if (!cmd) return;
+    stream.textContent += `$ ${cmd}\n`;
+    stream.textContent += commandResponse(cmd) + '\n';
+    stream.scrollTop = stream.scrollHeight;
+  });
+}
+
+function commandResponse(cmd) {
+  const lc = cmd.toLowerCase();
+  if (lc === 'help') return 'available: nvidia-smi, uptime, ls, whoami, date, clear';
+  if (lc === 'clear') {
+    const stream = document.getElementById('consoleStream');
+    if (stream) stream.textContent = '';
+    return '';
+  }
+  if (lc === 'whoami') return 'root';
+  if (lc === 'date') return new Date().toUTCString();
+  if (lc === 'ls') return 'cuda-12.4  inference-runtime  triton-server.log  vllm.cfg';
+  if (lc.startsWith('echo ')) return cmd.slice(5);
+  if (lc === 'uptime') {
+    const h = Math.round(2 + Math.random() * 22);
+    return `up 187d ${h}h, load avg: 0.${Math.floor(Math.random() * 99)}`;
+  }
+  if (lc.startsWith('nvidia-smi')) return 'GPU 0: utilization 87% · power 690 W · temp 76 C';
+  return `bash: ${cmd.split(' ')[0]}: command not found (read-only operator console)`;
+}

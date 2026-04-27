@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Comfortaa:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/static/global-nav.css?v=20260425b" />
-  <link rel="stylesheet" href="/static/dashboard.css?v=20260424" />
+  <link rel="stylesheet" href="/static/dashboard.css?v=20260427a" />
   <!-- Cross-page Forge state bridge (must load before dashboard.js) -->
   <script src="/static/forge-state.js?v=20260425c"></script>
 </head>
@@ -91,6 +91,37 @@
             <span class="preset-label">High Compute</span>
             <span class="preset-hint">95% CPU, 90% MEM</span>
           </button>
+        </div>
+      </section>
+
+      <section class="left-panel thresholds-panel" id="thresholdsPanel">
+        <h3>OPS THRESHOLDS
+          <button class="thresholds-help" type="button" id="thresholdsHelpBtn" aria-expanded="false" aria-label="What do these mean?">?</button>
+        </h3>
+        <p class="thresholds-help-body" id="thresholdsHelpBody" hidden>
+          Each rack is marked WARN or CRITICAL when its derived utilization
+          or temperature exceeds these thresholds. Numbers update live across
+          your build &mdash; tighten them to surface stress earlier, loosen
+          them if your facility is cooled below industry default.
+        </p>
+        <div class="threshold-row">
+          <label for="thresholdCpuWarn">CPU Warn (%)</label>
+          <input id="thresholdCpuWarn" type="number" min="40" max="99" step="1" value="75" data-threshold="cpuWarn" />
+        </div>
+        <div class="threshold-row">
+          <label for="thresholdCpuCrit">CPU Critical (%)</label>
+          <input id="thresholdCpuCrit" type="number" min="50" max="99" step="1" value="90" data-threshold="cpuCrit" />
+        </div>
+        <div class="threshold-row">
+          <label for="thresholdTempWarn">Temp Warn (°C)</label>
+          <input id="thresholdTempWarn" type="number" min="20" max="45" step="1" value="30" data-threshold="tempWarn" />
+        </div>
+        <div class="threshold-row">
+          <label for="thresholdTempCrit">Temp Critical (°C)</label>
+          <input id="thresholdTempCrit" type="number" min="22" max="60" step="1" value="34" data-threshold="tempCrit" />
+        </div>
+        <div class="threshold-row">
+          <button id="thresholdsReset" class="thresholds-reset" type="button">RESET TO DEFAULTS</button>
         </div>
       </section>
     </aside>
@@ -219,6 +250,6 @@
     </aside>
   </main>
 
-  <script src="/static/dashboard.js?v=20260425b" defer></script>
+  <script src="/static/dashboard.js?v=20260427a" defer></script>
 </body>
 </html>

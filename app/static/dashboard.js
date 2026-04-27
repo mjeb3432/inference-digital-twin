@@ -47,7 +47,49 @@ function rackLayoutFor(count) {
   return { rows: ["A", "B", "C", "D", "E", "F", "G", "H"], cols: [1, 2, 3, 4, 5, 6, 7, 8] };
 }
 
+// ─── User-controlled ops thresholds ────────────────────────────────
+//
+// Persisted in localStorage so the user's choices survive page reloads.
+// The defaults are tuned to be realistic: 75/90 % CPU and 30/34 °C
+// thresholds match what most NOC dashboards (Datadog, NewRelic,
+// Cloudwatch) ship with for GPU compute.
+const THRESH_DEFAULTS = { cpuWarn: 75, cpuCrit: 90, tempWarn: 30, tempCrit: 34 };
+const THRESH_KEY = "dashboard:opsThresholds:v1";
+
+function loadThresholds() {
+  try {
+    const raw = localStorage.getItem(THRESH_KEY);
+    if (!raw) return { ...THRESH_DEFAULTS };
+    const parsed = JSON.parse(raw);
+    return { ...THRESH_DEFAULTS, ...(parsed || {}) };
+  } catch (_) {
+    return { ...THRESH_DEFAULTS };
+  }
+}
+
+function saveThresholds(t) {
+  try { localStorage.setItem(THRESH_KEY, JSON.stringify(t)); } catch (_) {}
+}
+
+let opsThresholds = loadThresholds();
+
 // ─── Rack data — driven by Forge snapshot ──────────────────────────
+//
+// Per-rack metrics are now DERIVED from the snapshot, not random:
+//
+//   * CPU%   = (snapshot MFU × ~80 %) ± per-rack jitter
+//              MFU is the fraction of GPU compute actually used by the
+//              workload — a realistic reflection of "load" per rack.
+//   * Temp   = baseline driven by cooling type (immersion → 18 C,
+//              liquid → 22 C, air → 28 C) + small per-rack delta
+//              proportional to that rack's CPU loading.
+//   * Power  = total MW draw / rack count + ±12 % per-rack jitter
+//              (matches what real DC tools show because each rack's
+//              actual draw varies with the workload landed on it).
+//
+// The per-rack jitter is SEEDED by rack index, so the same build always
+// shows the same per-rack values — no more numbers that flicker
+// every page reload.
 function generateRackData(snapshot) {
   const rackCount = snapshot && window.ForgeState
     ? window.ForgeState.deriveRackCount(snapshot)
@@ -61,37 +103,114 @@ function generateRackData(snapshot) {
     : "TOR-DC-01";
   const hostPrefix = dcCode.toLowerCase().replace(/[^a-z0-9]/g, "-");
 
+  // Cluster-wide MFU drives the per-rack CPU baseline. If we don't have
+  // a benchmark yet, fall back to a moderate 60 % so the page isn't blank.
+  const clusterMfu = Number(snapshot?.metrics?.mfu)
+    || Number(snapshot?.benchmarks?.mfu)
+    || 60;
+
+  // Cooling-type drives the temp baseline.
+  const coolingType = String(
+    snapshot?.facilityCons?.cooling
+    || snapshot?.facility?.coolingType
+    || ""
+  ).toLowerCase();
+  let tempBaseline = 28; // air-cooled
+  if (coolingType.includes("immersion")) tempBaseline = 18;
+  else if (coolingType.includes("liquid") || coolingType.includes("d2c")) tempBaseline = 22;
+
+  // Total MW → per-rack kW
+  const mwDraw = (snapshot && window.ForgeState)
+    ? window.ForgeState.deriveMwDraw(snapshot)
+    : 3.2;
+  const baselinePerRackKw = (mwDraw * 1000) / Math.max(1, rackCount);
+
   const layout = rackLayoutFor(rackCount);
   const racks = [];
   let placed = 0;
+  let idx = 0;
   for (const row of layout.rows) {
     for (const col of layout.cols) {
       if (placed >= rackCount) break;
       placed++;
+
+      // Stable per-rack seed → repeatable jitter across renders
+      const seed = stableSeed(`${row}${col}-${rackCount}`);
       const id = `RACK-${row}${col}`;
-      const cpu = Math.round(rng.range(45, 95));
-      const temp = Math.round(rng.range(75, 87));
-      const power = rng.range(2.5, 4.5);
-      const status = cpu > 85 ? "critical" : cpu > 75 ? "warn" : "online";
+
+      // CPU% = MFU-derived load (most racks run near cluster MFU,
+      // some hot spots run hotter, some cooler) — clamp 25-99
+      const cpu = clamp(Math.round(clusterMfu * (0.78 + seed * 0.45)), 25, 99);
+
+      // Power kW — proportional to load with a small spread
+      const power = clamp(baselinePerRackKw * (0.92 + seed * 0.18), 0.5, baselinePerRackKw * 1.4);
+
+      // Temp — air-cooled racks rise more under load than immersion
+      const heatRiseFactor = coolingType.includes("immersion") ? 0.12
+        : coolingType.includes("liquid") ? 0.18 : 0.32;
+      const temp = clamp(
+        tempBaseline + (cpu / 100) * (heatRiseFactor * 32) + (seed - 0.5) * 2,
+        tempBaseline - 1,
+        tempBaseline + 14
+      );
+
+      // Status + reason are computed against the user's thresholds
+      const { status, reason } = classifyRack(cpu, temp, opsThresholds);
 
       racks.push({
         id,
         row,
         col,
         hostname: `${hostPrefix}-${row.toLowerCase()}${col}-host-01`,
-        ip: `10.${(rng.range(1, 50) | 0)}.${(rng.range(1, 255) | 0)}.${(rng.range(100, 200) | 0)}`,
+        ip: `10.${42 + (idx % 24)}.${(seed * 200) | 0}.${100 + (idx % 100)}`,
         status,
+        reason,
         led: status,
         cpu,
-        temp,
-        power,
+        temp: Number(temp.toFixed(1)),
+        power: Number(power.toFixed(2)),
         rackUnits: 42,
         gpus: gpusPerRack,
         gpuModel,
       });
+
+      idx++;
     }
   }
   return racks;
+}
+
+/**
+ * Classify a rack against the user's thresholds and return both the
+ * severity and a HUMAN-READABLE reason for it. The reason is what we
+ * surface on hover so operators can tell "WHY is this critical?"
+ * without having to dig through code.
+ */
+function classifyRack(cpu, temp, t) {
+  if (cpu >= t.cpuCrit) {
+    return { status: "critical", reason: `CPU at ${cpu}% — at or above the ${t.cpuCrit}% critical threshold (set in Ops Thresholds).` };
+  }
+  if (temp >= t.tempCrit) {
+    return { status: "critical", reason: `Temperature ${temp.toFixed ? temp.toFixed(1) : temp}°C — at or above the ${t.tempCrit}°C critical threshold.` };
+  }
+  if (cpu >= t.cpuWarn) {
+    return { status: "warn", reason: `CPU at ${cpu}% — above the ${t.cpuWarn}% warn threshold (still operational).` };
+  }
+  if (temp >= t.tempWarn) {
+    return { status: "warn", reason: `Temperature ${temp.toFixed ? temp.toFixed(1) : temp}°C — above the ${t.tempWarn}°C warn threshold.` };
+  }
+  return { status: "online", reason: `All metrics within thresholds (CPU ${cpu}% / Temp ${temp.toFixed ? temp.toFixed(1) : temp}°C).` };
+}
+
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+function stableSeed(key) {
+  let h = 0;
+  for (let i = 0; i < key.length; i += 1) {
+    h = (h * 31 + key.charCodeAt(i)) | 0;
+  }
+  const v = Math.abs(Math.sin(h * 0.31415));
+  return v - Math.floor(v);
 }
 
 // ─── Static elements (header, gauges, alerts) ──────────────────────
@@ -218,17 +337,29 @@ function renderRackGrid() {
 
   RACKS.forEach((rack) => {
     const card = document.createElement("div");
-    card.className = `rack-card ${rack === selectedRack ? "selected" : ""}`;
+    card.className = `rack-card status-${rack.status} ${rack === selectedRack ? "selected" : ""}`;
     card.dataset.rackId = rack.id;
+    /* Native browser tooltip — works without us styling a popover and
+     * conveys the WHY without extra UI weight. The same reason is
+     * rendered as a small visible badge on warn/critical cards too. */
+    card.title = rack.reason;
 
-    const cpuColor = rack.cpu > 85 ? "critical" : rack.cpu > 75 ? "warn" : "";
+    const cpuColor =
+      rack.cpu >= opsThresholds.cpuCrit ? "critical"
+      : rack.cpu >= opsThresholds.cpuWarn ? "warn"
+      : "";
+
+    const reasonBadge =
+      rack.status !== "online"
+        ? `<div class="rack-reason ${rack.status}" data-action="explain-rack" title="${rack.reason}">WHY?</div>`
+        : "";
 
     card.innerHTML = `
       <div class="rack-header">
         <span>${rack.id}</span>
         <span class="rack-led ${rack.led}"></span>
       </div>
-      <div class="rack-status">${rack.status.toUpperCase()}</div>
+      <div class="rack-status ${rack.status}">${rack.status.toUpperCase()}</div>
       <div>
         <div class="cpu-bar">
           <div class="cpu-bar-fill ${cpuColor}" style="width: ${rack.cpu}%"></div>
@@ -238,6 +369,7 @@ function renderRackGrid() {
         <div><strong>CPU</strong> ${rack.cpu}% ${rack.temp}°C ${rack.power.toFixed(1)}kW</div>
         <div><strong>${rack.rackUnits}U</strong> ${rack.gpuModel.split(" ")[0]}×${rack.gpus}</div>
       </div>
+      ${reasonBadge}
       <div class="rack-chip">INFER ACTIVE</div>
     `;
 
@@ -309,21 +441,68 @@ function updateMetrics() {
 }
 
 // ─── Metrics ticker ────────────────────────────────────────────────
+//
+// The previous ticker was wildly unbounded (rack.cpu drifted +/- 5-10
+// every 2s, status flipped randomly between online/warn/critical). That
+// made the dashboard feel chaotic and made the warning explanations
+// unstable: by the time a user mouse-hovered a critical rack to see
+// why it was critical, it had already drifted back to online.
+//
+// New ticker: a small mean-reverting wobble around each rack's
+// snapshot-derived baseline, recomputing status against the user's
+// thresholds on every tick. Cleaner UX + the explanations stay valid.
 function startMetricsTicker() {
   setInterval(() => {
     RACKS.forEach((rack) => {
-      rack.cpu = Math.round(rack.cpu + rng.range(-5, 10));
-      rack.cpu = Math.max(20, Math.min(99, rack.cpu));
-      rack.temp = Math.round(rack.temp + rng.range(-2, 3));
+      // Anchor each rack to its derived baseline; wobble is < ±3 percentage
+      // points and < ±1 °C — enough to feel alive, not enough to flip status.
+      const cpuBase = rack._cpuBase || rack.cpu;
+      rack._cpuBase = cpuBase;
+      const tempBase = rack._tempBase || rack.temp;
+      rack._tempBase = tempBase;
+
+      const cpuJitter = (Math.random() - 0.5) * 5;        // ±2.5 pp
+      const tempJitter = (Math.random() - 0.5) * 1.4;     // ±0.7 °C
+
+      rack.cpu = clamp(Math.round(cpuBase + cpuJitter), 20, 99);
+      rack.temp = clamp(Number((tempBase + tempJitter).toFixed(1)), 14, 60);
+
+      const { status, reason } = classifyRack(rack.cpu, rack.temp, opsThresholds);
+      rack.status = status;
+      rack.led = status;
+      rack.reason = reason;
     });
     renderRackGrid();
-    if (selectedRack) selectRack(selectedRack);
+    if (selectedRack) {
+      // Re-pick the same rack so its inspector reflects the new metrics
+      const same = RACKS.find((r) => r.id === selectedRack.id);
+      if (same) selectRack(same);
+    }
   }, 2000);
+}
+
+// Recompute classification on every rack against the current thresholds.
+// Called when the user changes a threshold value.
+function reclassifyAllRacks() {
+  RACKS.forEach((r) => {
+    const { status, reason } = classifyRack(r.cpu, r.temp, opsThresholds);
+    r.status = status;
+    r.led = status;
+    r.reason = reason;
+  });
+  renderRackGrid();
+  if (selectedRack) {
+    const same = RACKS.find((r) => r.id === selectedRack.id);
+    if (same) selectRack(same);
+  }
 }
 
 // ─── Event listeners ──────────────────────────────────────────────
 document.addEventListener("DOMContentLoaded", () => {
   initDashboard();
+
+  // Reflect saved threshold values into the inputs on load
+  syncThresholdInputs();
 
   document.querySelectorAll("[data-preset]").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -357,4 +536,79 @@ document.addEventListener("DOMContentLoaded", () => {
       input.value = Math.max(min, Math.min(max, parseInt(input.value, 10) + delta));
     });
   });
+
+  // Threshold inputs — apply on every keystroke + persist on blur.
+  document.querySelectorAll('[data-threshold]').forEach((input) => {
+    input.addEventListener('input', () => {
+      const key = input.dataset.threshold;
+      const n = Number(input.value);
+      if (!Number.isFinite(n)) return;
+      opsThresholds[key] = n;
+      saveThresholds(opsThresholds);
+      reclassifyAllRacks();
+    });
+  });
+
+  // Reset button — restore defaults and propagate
+  const resetBtn = document.getElementById('thresholdsReset');
+  if (resetBtn) {
+    resetBtn.addEventListener('click', () => {
+      opsThresholds = { ...THRESH_DEFAULTS };
+      saveThresholds(opsThresholds);
+      syncThresholdInputs();
+      reclassifyAllRacks();
+    });
+  }
+
+  // "?" help toggle
+  const helpBtn = document.getElementById('thresholdsHelpBtn');
+  const helpBody = document.getElementById('thresholdsHelpBody');
+  if (helpBtn && helpBody) {
+    helpBtn.addEventListener('click', () => {
+      const open = helpBody.hasAttribute('hidden');
+      if (open) {
+        helpBody.removeAttribute('hidden');
+        helpBtn.setAttribute('aria-expanded', 'true');
+      } else {
+        helpBody.setAttribute('hidden', '');
+        helpBtn.setAttribute('aria-expanded', 'false');
+      }
+    });
+  }
+
+  // Click-to-explain on the WHY? badge — toast-style explanation.
+  document.addEventListener('click', (e) => {
+    const why = e.target.closest('[data-action="explain-rack"]');
+    if (!why) return;
+    e.stopPropagation();
+    const card = why.closest('.rack-card');
+    const id = card?.dataset.rackId;
+    const rack = RACKS.find((r) => r.id === id);
+    if (rack) showWhyToast(rack);
+  });
 });
+
+function syncThresholdInputs() {
+  document.querySelectorAll('[data-threshold]').forEach((input) => {
+    const key = input.dataset.threshold;
+    if (opsThresholds[key] != null) input.value = opsThresholds[key];
+  });
+}
+
+let whyToastTimer = null;
+function showWhyToast(rack) {
+  let toast = document.getElementById('whyToast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'whyToast';
+    toast.className = 'why-toast';
+    document.body.appendChild(toast);
+  }
+  toast.innerHTML = `
+    <div class="why-toast-head">${rack.id} &middot; ${rack.status.toUpperCase()}</div>
+    <div class="why-toast-body">${rack.reason}</div>
+    <div class="why-toast-foot">Adjust the threshold values in the OPS THRESHOLDS panel on the left.</div>`;
+  toast.classList.add('open');
+  if (whyToastTimer) clearTimeout(whyToastTimer);
+  whyToastTimer = setTimeout(() => toast.classList.remove('open'), 5500);
+}

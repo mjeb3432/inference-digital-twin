@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Comfortaa:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/static/global-nav.css?v=20260425b" />
-  <link rel="stylesheet" href="/static/control-room.css?v=20260424" />
+  <link rel="stylesheet" href="/static/control-room.css?v=20260427a" />
   <!-- Cross-page Forge state bridge (must load before control-room.js) -->
   <script src="/static/forge-state.js?v=20260425c"></script>
 </head>
@@ -197,14 +197,22 @@
 
       <section class="control-actions">
         <h3>CONTROL</h3>
-        <div class="toggle-group">
-          <button class="toggle-btn active" data-state="on">ON</button>
-          <button class="toggle-btn" data-state="off">OFF</button>
+        <div class="toggle-group" id="powerToggleGroup">
+          <button class="toggle-btn active" data-action="set-power" data-state="on">ON</button>
+          <button class="toggle-btn" data-action="set-power" data-state="off">OFF</button>
         </div>
         <div class="action-buttons">
-          <button class="confirm-button" type="button">REBOOT</button>
-          <button class="confirm-button" type="button">BENCHMARK</button>
-          <button class="confirm-button" type="button">OPEN CONSOLE</button>
+          <button class="confirm-button" type="button" data-action="reboot">REBOOT</button>
+          <button class="confirm-button" type="button" data-action="benchmark">BENCHMARK</button>
+          <button class="confirm-button" type="button" data-action="open-console">OPEN CONSOLE</button>
+        </div>
+        <div class="action-status" id="actionStatus" hidden></div>
+        <div class="benchmark-strip" id="benchmarkStrip" hidden>
+          <div class="benchmark-strip-header">
+            <span class="benchmark-strip-label">SYNTHETIC INFER PASS</span>
+            <span class="benchmark-strip-tps mono" id="benchmarkStripTps">0 TPS</span>
+          </div>
+          <div class="benchmark-strip-bar"><div class="benchmark-strip-fill" id="benchmarkStripFill"></div></div>
         </div>
       </section>
 
@@ -237,6 +245,30 @@
     </aside>
   </main>
 
-  <script src="/static/control-room.js?v=20260425b" defer></script>
+  <!-- ── Console modal: opens when user clicks "OPEN CONSOLE" on a rack ── -->
+  <div class="console-modal" id="consoleModal" hidden role="dialog" aria-label="SSH console" aria-modal="true">
+    <div class="console-backdrop" data-action="close-console"></div>
+    <div class="console-window" role="document">
+      <header class="console-header">
+        <span class="console-title mono" id="consoleTitle">root@RACK-A-01 ~</span>
+        <div class="console-header-actions">
+          <button class="console-min" type="button" aria-label="Close console" data-action="close-console">×</button>
+        </div>
+      </header>
+      <pre class="console-stream mono" id="consoleStream"></pre>
+      <div class="console-prompt">
+        <span class="console-prompt-symbol mono">$</span>
+        <input
+          id="consoleInput"
+          class="console-input mono"
+          type="text"
+          placeholder="nvidia-smi"
+          spellcheck="false"
+          autocomplete="off" />
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/control-room.js?v=20260427a" defer></script>
 </body>
 </html>

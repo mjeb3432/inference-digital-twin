@@ -8,8 +8,8 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" crossorigin />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Comfortaa:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/static/intro.css?v=20260426a" />
-  <link rel="stylesheet" href="/static/forge.css?v=20260426a" />
+  <link rel="stylesheet" href="/static/intro.css?v=20260427a" />
+  <link rel="stylesheet" href="/static/forge.css?v=20260427a" />
   <link rel="stylesheet" href="/static/global-nav.css?v=20260425b" />
 </head>
 <body class="forge-page" data-active-nav="build">
@@ -178,21 +178,19 @@
       if (skip)  skip.addEventListener('click', function (e) { e.stopPropagation(); dismiss(); });
       if (enter) enter.addEventListener('click', function (e) { e.stopPropagation(); dismiss(); });
 
-      // Clicking the checkbox/label shouldn't dismiss the overlay.
+      // The "Don't show this again" checkbox is its own element — make sure
+      // clicks on it don't bubble anywhere we'd interpret as a dismiss.
       var skipToggle = overlay.querySelector('.intro-skip-toggle');
       if (skipToggle) skipToggle.addEventListener('click', function (e) { e.stopPropagation(); });
 
+      // Keyboard shortcut: Enter or Escape only — Space is too easy to hit by
+      // accident while reading the page. Click-anywhere is intentionally NOT
+      // wired; the user explicitly asked that only the ENTER THE HALL button
+      // dismisses the intro.
       window.addEventListener('keydown', function (e) {
-        if (e.key === 'Enter' || e.key === 'Escape' || e.key === ' ' || e.key === 'Spacebar') {
+        if (e.key === 'Enter' || e.key === 'Escape') {
           dismiss();
         }
-      });
-
-      // Click anywhere on the overlay background dismisses too.
-      overlay.addEventListener('click', function (e) {
-        var tag = (e.target && e.target.tagName) || '';
-        if (tag === 'BUTTON' || tag === 'INPUT' || tag === 'LABEL') return;
-        dismiss();
       });
 
     })();
@@ -202,7 +200,7 @@
   <script src="/static/intro.js?v=20260425c" defer></script>
   <!-- Cross-page Forge state bridge (must load before forge.js) -->
   <script src="/static/forge-state.js?v=20260425c" defer></script>
-  <script src="/static/forge.js?v=20260426a" defer></script>
+  <script src="/static/forge.js?v=20260427a" defer></script>
   <script src="/static/forge-zoom.js?v=20260424a" defer></script>
 
   <div class="desktop-banner" role="status">BEST VIEWED ON DESKTOP (1024PX+)</div>
