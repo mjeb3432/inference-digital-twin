@@ -721,3 +721,162 @@ h2, h3 {
 .event-item .text {
   flex: 1;
 }
+
+/* ──────────────────────────────────────────────────────────────────
+ * Ops thresholds panel — gives operators visibility into WHY a
+ * rack is showing as warning/critical and lets them tune the
+ * thresholds. Lives in the left rail under presets.
+ * ────────────────────────────────────────────────────────────────── */
+.thresholds-panel h3 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.thresholds-help {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid rgba(51, 251, 211, 0.4);
+  background: rgba(51, 251, 211, 0.08);
+  color: var(--accent, #33fbd3);
+  cursor: pointer;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 12px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, color 0.15s;
+}
+.thresholds-help:hover { background: rgba(51, 251, 211, 0.2); }
+
+.thresholds-help-body {
+  margin: 6px 0 12px;
+  padding: 9px 10px;
+  border-left: 2px solid var(--accent, #33fbd3);
+  background: rgba(51, 251, 211, 0.06);
+  font-size: 11px;
+  line-height: 1.5;
+  color: rgba(242, 247, 255, 0.78);
+}
+
+.threshold-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.threshold-row label {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: rgba(242, 247, 255, 0.78);
+}
+
+.threshold-row input[type="number"] {
+  width: 70px;
+  padding: 5px 7px;
+  background: rgba(15, 17, 20, 0.95);
+  border: 1px solid rgba(51, 251, 211, 0.32);
+  color: var(--text, #ededed);
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 12px;
+  text-align: right;
+  border-radius: 2px;
+}
+
+.threshold-row input[type="number"]:focus {
+  outline: none;
+  border-color: var(--accent, #33fbd3);
+  box-shadow: 0 0 0 1px rgba(51, 251, 211, 0.45);
+}
+
+.thresholds-reset {
+  width: 100%;
+  margin-top: 4px;
+  padding: 7px 10px;
+  background: transparent;
+  border: 1px solid rgba(120, 120, 130, 0.45);
+  color: rgba(242, 247, 255, 0.66);
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  cursor: pointer;
+  border-radius: 2px;
+  transition: border-color 0.15s, color 0.15s;
+}
+.thresholds-reset:hover {
+  border-color: var(--accent, #33fbd3);
+  color: var(--accent, #33fbd3);
+}
+
+/* Per-rack reason badge — surfaces only on warn/critical cards. */
+.rack-reason {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  font-size: 9.5px;
+  letter-spacing: 0.14em;
+  padding: 2px 6px;
+  border-radius: 2px;
+  background: rgba(255, 209, 102, 0.18);
+  color: #ffe4a8;
+  border: 1px solid rgba(255, 209, 102, 0.5);
+  cursor: help;
+  font-weight: 600;
+  z-index: 2;
+}
+.rack-reason.critical {
+  background: rgba(255, 107, 107, 0.18);
+  color: #ffd0d0;
+  border-color: rgba(255, 107, 107, 0.55);
+}
+.rack-card { position: relative; }
+
+.rack-status.warn { color: #FFD166; }
+.rack-status.critical { color: #FF6B6B; }
+
+/* Why-toast — large floating explanation card */
+.why-toast {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 8800;
+  max-width: 360px;
+  padding: 14px 16px;
+  background: rgba(10, 14, 22, 0.96);
+  border: 1px solid rgba(255, 209, 102, 0.55);
+  box-shadow: 0 10px 36px rgba(0, 0, 0, 0.55), 0 0 14px rgba(255, 209, 102, 0.18);
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  color: var(--text, #ededed);
+  opacity: 0;
+  transform: translateY(8px);
+  pointer-events: none;
+  transition: opacity 0.18s, transform 0.18s;
+}
+.why-toast.open {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+.why-toast-head {
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  color: #FFD166;
+  margin-bottom: 6px;
+}
+.why-toast-body {
+  font-size: 12px;
+  line-height: 1.5;
+  color: rgba(242, 247, 255, 0.92);
+  margin-bottom: 8px;
+}
+.why-toast-foot {
+  font-size: 10px;
+  color: rgba(242, 247, 255, 0.55);
+  letter-spacing: 0.04em;
+}
