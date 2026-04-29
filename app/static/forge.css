@@ -1718,7 +1718,30 @@ select option {
   font-family: var(--font-mono, "JetBrains Mono", monospace);
   /* nudge up so the card sits above the pin */
   margin: -36px 0 0 -1px;
-  transition: opacity 0.2s ease;
+  transition: opacity 0.16s ease, transform 0.05s linear;
+}
+
+/* By default labels are HIDDEN — only revealed when the cursor hovers
+ * close enough that the per-frame loop tags them with -active. The
+ * pin is also hidden in -hidden state so the scene stays visually
+ * clean until the user wants info. Without this rule the page would
+ * be peppered with always-on tags that compete with the 3D model. */
+.forge-3d-label.forge-3d-label-hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.forge-3d-label.forge-3d-label-active {
+  opacity: 1;
+  pointer-events: none;
+  z-index: 6;
+  /* Subtle scale-in so the reveal feels intentional. */
+  animation: forge-3d-label-pop 0.16s ease;
+}
+
+@keyframes forge-3d-label-pop {
+  from { transform: translate(var(--lx, 0), var(--ly, 0)) scale(0.92); opacity: 0; }
+  to   { opacity: 1; }
 }
 
 .forge-3d-label-pin {

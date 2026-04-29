@@ -164,9 +164,11 @@
     const height = container.clientHeight || 720;
 
     const scene = new THREE.Scene();
-    /* Deep mint-tinted dark — matches the rest of the Forge */
+    /* Skybox gradient sphere is added below — leave background as
+     * a solid fallback in case the shader fails. Fog still helps
+     * sell the depth at long viewing angles. */
     scene.background = new THREE.Color(0x05070a);
-    scene.fog = new THREE.Fog(0x05070a, 90, 260);
+    scene.fog = new THREE.Fog(0x0a1018, 90, 320);
 
     /* Camera framing — closer to the building so the user can read
      * the zone labels at default zoom. The building is centred at the
@@ -188,31 +190,71 @@
     renderer.domElement.classList.add("forge-3d-canvas");
 
     /* ---------- Lighting ---------- */
-    const ambient = new THREE.AmbientLight(0xffffff, 0.22);
+    /* Three-light rig: a hemisphere for soft sky+ground bounce, a
+     * directional sun for sharp shadows + form, and a warm fill
+     * to keep shadows from going flat. Plus a mint accent rim light
+     * for the "inference fabric" vibe. */
+    const hemi = new THREE.HemisphereLight(0x88aacc, 0x0a1820, 0.55);
+    scene.add(hemi);
+
+    const ambient = new THREE.AmbientLight(0xffffff, 0.12);
     scene.add(ambient);
 
-    /* Cool key light from "outside" the building */
-    const keyLight = new THREE.DirectionalLight(0xb0e8ff, 0.85);
-    keyLight.position.set(80, 100, 60);
+    /* Cool sun-like key light */
+    const keyLight = new THREE.DirectionalLight(0xfff1e0, 0.75);
+    keyLight.position.set(80, 110, 60);
     keyLight.castShadow = true;
-    keyLight.shadow.mapSize.set(1024, 1024);
+    keyLight.shadow.mapSize.set(2048, 2048);
     keyLight.shadow.camera.near = 10;
-    keyLight.shadow.camera.far = 260;
-    keyLight.shadow.camera.left = -110;
-    keyLight.shadow.camera.right = 110;
-    keyLight.shadow.camera.top = 110;
-    keyLight.shadow.camera.bottom = -110;
+    keyLight.shadow.camera.far = 280;
+    keyLight.shadow.camera.left = -120;
+    keyLight.shadow.camera.right = 120;
+    keyLight.shadow.camera.top = 120;
+    keyLight.shadow.camera.bottom = -120;
+    keyLight.shadow.bias = -0.0005;
     scene.add(keyLight);
 
-    /* Warm fill light from below to lift cabinet detail */
-    const fill = new THREE.DirectionalLight(0xff9a6e, 0.18);
+    /* Warm fill light to lift shadow detail */
+    const fill = new THREE.DirectionalLight(0xff9a6e, 0.16);
     fill.position.set(-50, 30, -60);
     scene.add(fill);
 
-    /* Mint-accent rim light to sell the "inference fabric" vibe */
+    /* Mint-accent rim light inside the data hall */
     const rim = new THREE.PointLight(0x33fbd3, 1.4, 160, 1.6);
     rim.position.set(0, CEILING_Y - 1, 0);
     scene.add(rim);
+
+    /* Skybox-like sphere — gives a subtle horizon gradient instead
+     * of a flat black background. Inside-out box with a vertical
+     * gradient material. */
+    const skyGeo = new THREE.SphereGeometry(420, 24, 18);
+    const skyMat = new THREE.ShaderMaterial({
+      side: THREE.BackSide,
+      depthWrite: false,
+      uniforms: {
+        topColor:    { value: new THREE.Color(0x05080d) },
+        bottomColor: { value: new THREE.Color(0x10202c) },
+        offset:      { value: 30 },
+        exponent:    { value: 0.7 },
+      },
+      vertexShader: `
+        varying vec3 vWorldPosition;
+        void main() {
+          vWorldPosition = (modelMatrix * vec4(position, 1.0)).xyz;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }`,
+      fragmentShader: `
+        uniform vec3 topColor;
+        uniform vec3 bottomColor;
+        uniform float offset;
+        uniform float exponent;
+        varying vec3 vWorldPosition;
+        void main() {
+          float h = normalize(vWorldPosition + offset).y;
+          gl_FragColor = vec4(mix(bottomColor, topColor, max(pow(max(h, 0.0), exponent), 0.0)), 1.0);
+        }`,
+    });
+    scene.add(new THREE.Mesh(skyGeo, skyMat));
 
     /* ---------- World group (centred on the building) ---------- */
     const worldGroup = new THREE.Group();
@@ -359,46 +401,293 @@
       });
     }
 
-    /* Translucent building walls. Phase 2+ — Phase 1 only shows the
-     * stake-out outline drawn above. Wall colour is location-aware. */
+    /* ---------- Architectural building shell ---------- */
+    /* Real DC buildings are NOT simple boxes — they're tilt-up
+     * concrete panel structures with parapets, loading docks,
+     * personnel entrances, rooftop mechanical penthouses, and
+     * perimeter fencing. We compose the building from those pieces
+     * here so the 3D scene reads as a real industrial facility. */
     if (showBuilding) {
-      const wallPal = locationType === "repurpose" ? { tint: 0xa8674a, edge: 0xc88860 }
-                    : locationType === "urban" ? { tint: 0x6dd6ff, edge: 0x6dd6ff }
-                    : { tint: 0x33fbd3, edge: 0x33fbd3 };
-      /* Once the facility is fully online, walls glow a touch brighter. */
-      const wallOpacity = (locationType === "repurpose" ? 0.18 : 0.04) * (fullyOnline ? 1.6 : 1);
-      const wallMat = new THREE.MeshStandardMaterial({
-        color: wallPal.tint,
-        transparent: true,
-        opacity: wallOpacity,
+      const wallPal = locationType === "repurpose"
+        ? { tint: 0x8a4a2a, panel: 0x6a3a20, accent: 0xc88860 }
+        : locationType === "urban"
+        ? { tint: 0x4a5560, panel: 0x363f49, accent: 0x6dd6ff }
+        : { tint: 0x6f7a85, panel: 0x4a525c, accent: 0x33fbd3 };
+
+      /* Solid concrete panel walls (one Mesh per face so we can give
+       * each face slightly different material to read seams + shadow
+       * gradient). Each face is divided into 5–8 vertical "panels"
+       * by a thin recessed line so the user perceives tilt-up
+       * construction. */
+      const W = sw(bldg.w);
+      const D = sw(bldg.h);
+      /* Walls are transparent — the user wants to see EVERY piece of
+       * equipment inside (data hall racks, mechanical CRAH columns,
+       * electrical switchgear, MMR rack). We render the panels as
+       * mostly-clear glass with a faint tint so the user still
+       * perceives a building shell, plus the panel seam lines + steel
+       * pilasters carry the architectural detail. */
+      const wallSolidMat = new THREE.MeshStandardMaterial({
+        color: wallPal.tint, roughness: 0.4, metalness: 0.15,
+        transparent: true, opacity: 0.10,
         side: THREE.DoubleSide,
-        roughness: locationType === "repurpose" ? 0.85 : 0.4,
-        metalness: 0.2,
+        depthWrite: false,
+        emissive: fullyOnline ? 0x081218 : 0x000000,
+        emissiveIntensity: fullyOnline ? 0.35 : 0,
       });
+      const wallShadeMat = new THREE.MeshStandardMaterial({
+        color: wallPal.panel, roughness: 0.45, metalness: 0.1,
+        transparent: true, opacity: 0.13,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      });
+      const seamMat = new THREE.LineBasicMaterial({ color: 0x0a0e12, transparent: true, opacity: 0.7 });
+
+      function placeWall(w, d, x, y, z, rotY, panelCount, mat) {
+        const g = new THREE.BoxGeometry(w, BUILDING_HEIGHT, d);
+        const m = new THREE.Mesh(g, mat);
+        m.position.set(x, y, z);
+        m.rotation.y = rotY;
+        m.castShadow = true;
+        m.receiveShadow = true;
+        worldGroup.add(m);
+        /* Vertical panel seams — short line segments dropped between
+         * each panel to read as the joint between tilt-up sections. */
+        for (let i = 1; i < panelCount; i++) {
+          const t = i / panelCount;
+          const seamGeo = new THREE.BufferGeometry().setFromPoints([
+            new THREE.Vector3(-w / 2 + t * w, -BUILDING_HEIGHT / 2 + 0.2, d / 2 + 0.01),
+            new THREE.Vector3(-w / 2 + t * w, BUILDING_HEIGHT / 2 - 0.2, d / 2 + 0.01),
+          ]);
+          const seam = new THREE.Line(seamGeo, seamMat);
+          seam.position.set(x, y, z);
+          seam.rotation.y = rotY;
+          worldGroup.add(seam);
+        }
+      }
+
+      /* North wall (facing +Z): full solid */
+      placeWall(W, 0.4, 0, BUILDING_HEIGHT / 2, D / 2, 0, 8, wallSolidMat);
+      /* South wall (facing -Z): solid with a 4-meter loading dock cut
+       * out near one corner. We render two pieces with the dock door
+       * panel between them. */
+      const dockW = 4.0;
+      const dockOff = -W * 0.25;
+      placeWall(W / 2 + dockOff - dockW / 2, 0.4, -W / 4 + dockOff / 2 - dockW / 4, BUILDING_HEIGHT / 2, -D / 2, 0, 4, wallSolidMat);
+      placeWall(W / 2 - dockOff + dockW / 2, 0.4, W / 4 + dockOff / 2 + dockW / 4, BUILDING_HEIGHT / 2, -D / 2, 0, 4, wallSolidMat);
+
+      /* Loading dock door — a tall amber rectangle inset into the
+       * south wall. Suggests the rolling shutter of a real facility. */
+      const dockMat = new THREE.MeshStandardMaterial({
+        color: 0x8a6230, roughness: 0.55, metalness: 0.4,
+        emissive: 0x2a1a08, emissiveIntensity: 0.4,
+      });
+      const dockGeo = new THREE.BoxGeometry(dockW, BUILDING_HEIGHT * 0.55, 0.3);
+      const dockDoor = new THREE.Mesh(dockGeo, dockMat);
+      dockDoor.position.set(dockOff, BUILDING_HEIGHT * 0.275, -D / 2 - 0.05);
+      dockDoor.castShadow = true;
+      worldGroup.add(dockDoor);
+
+      /* Concrete loading dock pad in front of the door */
+      const dockPadGeo = new THREE.BoxGeometry(dockW + 1.4, 0.6, 2.4);
+      const dockPadMat = new THREE.MeshStandardMaterial({ color: 0x363f49, roughness: 0.95 });
+      const dockPad = new THREE.Mesh(dockPadGeo, dockPadMat);
+      dockPad.position.set(dockOff, 0.3, -D / 2 - 1.4);
+      dockPad.receiveShadow = true;
+      worldGroup.add(dockPad);
+
+      /* East wall (facing +X) — has the personnel entrance + small
+       * canopy near the centre. */
+      placeWall(0.4, D, W / 2, BUILDING_HEIGHT / 2, 0, 0, 5, wallShadeMat);
+      const canopyMat = new THREE.MeshStandardMaterial({
+        color: wallPal.accent, transparent: true, opacity: 0.85,
+        roughness: 0.4, metalness: 0.2,
+      });
+      const canopyGeo = new THREE.BoxGeometry(0.15, 0.2, 2.6);
+      const canopy = new THREE.Mesh(canopyGeo, canopyMat);
+      canopy.position.set(W / 2 + 0.85, BUILDING_HEIGHT * 0.42, D * 0.18);
+      canopy.castShadow = true;
+      worldGroup.add(canopy);
+      const entryDoorMat = new THREE.MeshStandardMaterial({
+        color: 0x1a2026, roughness: 0.4, metalness: 0.3,
+        emissive: 0x051018, emissiveIntensity: 0.4,
+      });
+      const entryDoor = new THREE.Mesh(new THREE.BoxGeometry(0.2, BUILDING_HEIGHT * 0.32, 1.5), entryDoorMat);
+      entryDoor.position.set(W / 2 + 0.05, BUILDING_HEIGHT * 0.16, D * 0.18);
+      worldGroup.add(entryDoor);
+
+      /* West wall (facing -X) — solid with seams */
+      placeWall(0.4, D, -W / 2, BUILDING_HEIGHT / 2, 0, 0, 5, wallShadeMat);
+
+      /* Subtle blueprint outline so the silhouette stays crisp */
       const wallEdgeMat = new THREE.LineBasicMaterial({
-        color: wallPal.edge, transparent: true, opacity: showRoof ? 0.55 : 0.32,
+        color: wallPal.accent, transparent: true, opacity: 0.45,
       });
-      const wallGeo = new THREE.BoxGeometry(sw(bldg.w), BUILDING_HEIGHT, sw(bldg.h));
-      const wallMesh = new THREE.Mesh(wallGeo, wallMat);
-      wallMesh.position.y = BUILDING_HEIGHT / 2;
-      worldGroup.add(wallMesh);
-      const wallEdges = new THREE.LineSegments(new THREE.EdgesGeometry(wallGeo), wallEdgeMat);
-      wallEdges.position.copy(wallMesh.position);
+      const wallShellGeo = new THREE.BoxGeometry(W, BUILDING_HEIGHT, D);
+      const wallEdges = new THREE.LineSegments(new THREE.EdgesGeometry(wallShellGeo), wallEdgeMat);
+      wallEdges.position.y = BUILDING_HEIGHT / 2;
       worldGroup.add(wallEdges);
+
+      /* Steel corner pilasters at the building corners — narrow tall
+       * columns that read as structural steel. */
+      const pilasterMat = new THREE.MeshStandardMaterial({
+        color: 0x2a323b, roughness: 0.35, metalness: 0.7,
+      });
+      [[-W / 2, -D / 2], [W / 2, -D / 2], [-W / 2, D / 2], [W / 2, D / 2]].forEach(([cx2, cz2]) => {
+        const pil = new THREE.Mesh(
+          new THREE.BoxGeometry(0.5, BUILDING_HEIGHT + 0.4, 0.5),
+          pilasterMat
+        );
+        pil.position.set(cx2, BUILDING_HEIGHT / 2, cz2);
+        pil.castShadow = true;
+        worldGroup.add(pil);
+      });
+
+      /* Perimeter fence — chain-link + posts running along the
+       * setback band so the user feels the facility is secured. */
+      if (plan.site) {
+        const sw_w = sw(plan.site.w - plan.site.setback * 1.1);
+        const sw_h = sw(plan.site.h - plan.site.setback * 1.1);
+        const fencePostMat = new THREE.MeshStandardMaterial({ color: 0x40474f, roughness: 0.6, metalness: 0.5 });
+        const fenceMesh = new THREE.MeshStandardMaterial({
+          color: 0x40474f, transparent: true, opacity: 0.18,
+          roughness: 0.5, metalness: 0.5, side: THREE.DoubleSide,
+        });
+        /* Four fence rails */
+        const railH = 1.6;
+        const fenceGroup = new THREE.Group();
+        const longGeo = new THREE.BoxGeometry(sw_w, railH, 0.05);
+        const shortGeo = new THREE.BoxGeometry(0.05, railH, sw_h);
+        [-sw_h / 2, sw_h / 2].forEach((zz) => {
+          const m = new THREE.Mesh(longGeo, fenceMesh);
+          m.position.set(0, railH / 2, zz);
+          fenceGroup.add(m);
+        });
+        [-sw_w / 2, sw_w / 2].forEach((xx) => {
+          const m = new THREE.Mesh(shortGeo, fenceMesh);
+          m.position.set(xx, railH / 2, 0);
+          fenceGroup.add(m);
+        });
+        /* Posts every ~6 units along each rail */
+        const postGeo = new THREE.CylinderGeometry(0.06, 0.06, railH + 0.2, 6);
+        const postSpacing = 6;
+        for (let xx = -sw_w / 2; xx <= sw_w / 2 + 0.001; xx += postSpacing) {
+          [-sw_h / 2, sw_h / 2].forEach((zz) => {
+            const post = new THREE.Mesh(postGeo, fencePostMat);
+            post.position.set(xx, railH / 2, zz);
+            fenceGroup.add(post);
+          });
+        }
+        for (let zz = -sw_h / 2 + postSpacing; zz <= sw_h / 2 - postSpacing + 0.001; zz += postSpacing) {
+          [-sw_w / 2, sw_w / 2].forEach((xx) => {
+            const post = new THREE.Mesh(postGeo, fencePostMat);
+            post.position.set(xx, railH / 2, zz);
+            fenceGroup.add(post);
+          });
+        }
+        worldGroup.add(fenceGroup);
+      }
+
+      /* Site light poles — 4 corner poles + 4 edge poles. Each has a
+       * point light at the top (low intensity so we don't overload
+       * the renderer). */
+      const poleMat = new THREE.MeshStandardMaterial({ color: 0x2a323b, roughness: 0.5, metalness: 0.6 });
+      const lampMat = new THREE.MeshBasicMaterial({ color: 0xfff3c8 });
+      const polePositions = [
+        [-W * 0.7, -D * 0.7], [W * 0.7, -D * 0.7], [-W * 0.7, D * 0.7], [W * 0.7, D * 0.7],
+        [0, -D * 0.85], [0, D * 0.85], [-W * 0.85, 0], [W * 0.85, 0],
+      ];
+      polePositions.forEach(([px, pz]) => {
+        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 6.5, 6), poleMat);
+        pole.position.set(px, 3.25, pz);
+        pole.castShadow = true;
+        worldGroup.add(pole);
+        const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.18, 8, 8), lampMat);
+        lamp.position.set(px, 6.5, pz);
+        worldGroup.add(lamp);
+      });
     }
 
     /* Building roof — appears at Phase 4 once construction is approved.
-     * Until then we leave the building "open" so the user can see the
-     * coming-soon interior layout. */
+     * Real DC roofs have a parapet, mechanical penthouses, exhaust
+     * stacks, and a clearly defined membrane. We compose those here. */
     if (showRoof) {
-      const roofGeo = new THREE.BoxGeometry(sw(bldg.w) * 0.99, 0.3, sw(bldg.h) * 0.99);
+      const W = sw(bldg.w);
+      const D = sw(bldg.h);
+      /* Roof membrane — also transparent so the user can see racks
+       * from above. We keep a slight tint so the roof plane still
+       * reads as a surface (without it the parapet would float). */
+      const roofGeo = new THREE.BoxGeometry(W * 0.99, 0.3, D * 0.99);
       const roofMat = new THREE.MeshStandardMaterial({
-        color: 0x0d1116, roughness: 0.85, metalness: 0.1,
+        color: 0x131820, roughness: 0.92, metalness: 0.05,
+        transparent: true, opacity: 0.18, depthWrite: false,
       });
       const roof = new THREE.Mesh(roofGeo, roofMat);
       roof.position.y = BUILDING_HEIGHT + 0.15;
       roof.receiveShadow = true;
       worldGroup.add(roof);
+
+      /* Parapet — short border wall around the roof edge so the
+       * silhouette reads as a real industrial roofline (not a
+       * sharp-edged box). Built as four thin Box meshes. */
+      const parapetMat = new THREE.MeshStandardMaterial({
+        color: 0x4a525c, roughness: 0.85, metalness: 0.1,
+      });
+      const parapetH = 0.85;
+      const long = new THREE.BoxGeometry(W * 1.005, parapetH, 0.4);
+      const shortP = new THREE.BoxGeometry(0.4, parapetH, D * 1.005);
+      [[0, BUILDING_HEIGHT + parapetH / 2 + 0.3, D / 2 + 0.0], 0].forEach(() => {});
+      const pn = new THREE.Mesh(long, parapetMat);
+      pn.position.set(0, BUILDING_HEIGHT + parapetH / 2 + 0.3, D / 2);
+      pn.castShadow = true;
+      worldGroup.add(pn);
+      const ps = new THREE.Mesh(long, parapetMat);
+      ps.position.set(0, BUILDING_HEIGHT + parapetH / 2 + 0.3, -D / 2);
+      ps.castShadow = true;
+      worldGroup.add(ps);
+      const pe = new THREE.Mesh(shortP, parapetMat);
+      pe.position.set(W / 2, BUILDING_HEIGHT + parapetH / 2 + 0.3, 0);
+      pe.castShadow = true;
+      worldGroup.add(pe);
+      const pw = new THREE.Mesh(shortP, parapetMat);
+      pw.position.set(-W / 2, BUILDING_HEIGHT + parapetH / 2 + 0.3, 0);
+      pw.castShadow = true;
+      worldGroup.add(pw);
+
+      /* Mechanical penthouse — a smaller box on the roof toward the
+       * mechanical-room side so the silhouette has vertical interest. */
+      const penthouseMat = new THREE.MeshStandardMaterial({
+        color: 0x383f48, roughness: 0.75, metalness: 0.2,
+      });
+      const penthouseGeo = new THREE.BoxGeometry(sw(plan.rooms.mechanical?.w || 80) * 0.9, 1.6, sw(plan.rooms.mechanical?.h || 50) * 0.55);
+      const penthouse = new THREE.Mesh(penthouseGeo, penthouseMat);
+      const [pmx, , pmz] = plan.rooms.mechanical
+        ? svgToWorld(plan.rooms.mechanical.x + plan.rooms.mechanical.w / 2, plan.rooms.mechanical.y + plan.rooms.mechanical.h / 2)
+        : [-W * 0.3, 0, -D * 0.3];
+      penthouse.position.set(pmx, BUILDING_HEIGHT + 0.95, pmz);
+      penthouse.castShadow = true;
+      worldGroup.add(penthouse);
+
+      /* Exhaust stacks rising from the roof (gas-genset exhaust path). */
+      if (powerMix.gas > 0) {
+        const stackMat = new THREE.MeshStandardMaterial({
+          color: 0x2a323b, roughness: 0.7, metalness: 0.5,
+        });
+        for (let i = 0; i < 2; i++) {
+          const stack = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.22, 2.6, 8), stackMat);
+          stack.position.set(-W * 0.35 + i * 1.4, BUILDING_HEIGHT + 1.4, D * 0.32);
+          stack.castShadow = true;
+          worldGroup.add(stack);
+        }
+      }
+
+      /* HVAC ducts running across part of the roof */
+      const ductMat = new THREE.MeshStandardMaterial({ color: 0xc8cdd4, roughness: 0.4, metalness: 0.55 });
+      const ductGeo = new THREE.BoxGeometry(W * 0.6, 0.35, 0.5);
+      const duct = new THREE.Mesh(ductGeo, ductMat);
+      duct.position.set(0, BUILDING_HEIGHT + 0.55, D * 0.1);
+      duct.castShadow = true;
+      worldGroup.add(duct);
     }
 
     /* ---------- Floor grid inside building ---------- */
@@ -921,18 +1210,24 @@
     compass.position.set(-sw(bldg.w) / 2 - 1.5, 0, -sw(bldg.h) / 2 - 1.5);
     worldGroup.add(compass);
 
-    /* ---------- HTML overlay labels ---------- */
-    /* Each label is a `<div>` positioned absolutely inside the
-     * container. We update the screen-space position of every label
-     * once per render frame by projecting the world position through
-     * the camera. */
+    /* ---------- HTML overlay labels (hover-only) ---------- */
+    /* Labels are intentionally hidden by default — they only appear
+     * when the user hovers near a labeled piece of equipment. We
+     * project every label position to screen space each frame, then
+     * the mousemove handler shows the closest label within a small
+     * pixel radius of the cursor and hides everything else. This
+     * keeps the scene visually quiet until the user wants info. */
     const labelLayer = document.createElement("div");
     labelLayer.className = "forge-3d-label-layer";
     container.appendChild(labelLayer);
 
+    /* Always-on tiny pin marker for every labeled object so the user
+     * knows which things have hover info — but the title/sub card is
+     * hidden until hover. The pin is a separate element from the card
+     * so we can keep the marker visible while the card is hidden. */
     const labelEls = labelTargets.map((tgt) => {
       const el = document.createElement("div");
-      el.className = `forge-3d-label forge-3d-label-${tgt.kind}`;
+      el.className = `forge-3d-label forge-3d-label-${tgt.kind} forge-3d-label-hidden`;
       el.innerHTML = `
         <div class="forge-3d-label-pin"></div>
         <div class="forge-3d-label-card">
@@ -941,8 +1236,29 @@
         </div>
       `;
       labelLayer.appendChild(el);
-      return { el, target: tgt, vec: new THREE.Vector3(tgt.x, tgt.y, tgt.z) };
+      return {
+        el,
+        target: tgt,
+        vec: new THREE.Vector3(tgt.x, tgt.y, tgt.z),
+        sx: 0, sy: 0, depth: 1, onScreen: false,
+      };
     });
+
+    /* Track cursor position relative to the canvas. mouseLeave hides
+     * any open label so the scene returns to a clean state when the
+     * user moves out of the canvas. */
+    let cursor = { x: -9999, y: -9999, inside: false };
+    function onPointerMove(e) {
+      const r = renderer.domElement.getBoundingClientRect();
+      cursor.x = e.clientX - r.left;
+      cursor.y = e.clientY - r.top;
+      cursor.inside = true;
+    }
+    function onPointerLeave() {
+      cursor.inside = false;
+    }
+    renderer.domElement.addEventListener("pointermove", onPointerMove);
+    renderer.domElement.addEventListener("pointerleave", onPointerLeave);
 
     function escapeHtml(s) {
       return String(s == null ? "" : s)
@@ -1000,42 +1316,46 @@
       controls.update();
       renderer.render(scene, camera);
 
-      /* Update label positions, then de-cluster: when two labels land
-       * within ~70 px of each other on screen, fade the one farther
-       * from the camera so the front-most label remains crisp. This
-       * keeps the scene legible from any orbit angle. */
+      /* Project every label to screen space, then reveal the one
+       * closest to the cursor (within HOVER_RADIUS px). All others
+       * stay hidden so the scene reads cleanly. */
       const w = container.clientWidth || width;
       const h = container.clientHeight || height;
-      const projected = labelEls.map(({ el, vec, target }) => {
-        tmpVec.copy(vec).project(camera);
-        const sx = (tmpVec.x * 0.5 + 0.5) * w;
-        const sy = (-tmpVec.y * 0.5 + 0.5) * h;
-        const onScreen = tmpVec.z > -1 && tmpVec.z < 1 && sx > -50 && sx < w + 50 && sy > -50 && sy < h + 50;
-        return { el, sx, sy, depth: tmpVec.z, onScreen, target };
-      });
-      /* Sort front-to-back; nearer labels win in cluster collisions. */
-      projected.sort((a, b) => a.depth - b.depth);
-      const taken = [];
-      projected.forEach((p) => {
-        if (!p.onScreen) {
-          p.el.style.opacity = "0";
-          p.el.style.pointerEvents = "none";
-          return;
-        }
-        let occluded = false;
-        for (let i = 0; i < taken.length; i++) {
-          const t = taken[i];
-          if (Math.abs(t.sx - p.sx) < 90 && Math.abs(t.sy - p.sy) < 38) { occluded = true; break; }
-        }
+      labelEls.forEach((p) => {
+        tmpVec.copy(p.vec).project(camera);
+        p.sx = (tmpVec.x * 0.5 + 0.5) * w;
+        p.sy = (-tmpVec.y * 0.5 + 0.5) * h;
+        p.depth = tmpVec.z;
+        p.onScreen = tmpVec.z > -1 && tmpVec.z < 1
+          && p.sx > -50 && p.sx < w + 50
+          && p.sy > -50 && p.sy < h + 50;
+        /* Position the (possibly-hidden) element so the show/hide
+         * transition happens in place rather than from origin. */
         p.el.style.transform = `translate(${p.sx.toFixed(1)}px, ${p.sy.toFixed(1)}px)`;
-        const depthFade = 1 - Math.min(1, Math.max(0, (p.depth + 0.6) / 1.6));
-        if (occluded) {
-          p.el.style.opacity = "0.18";
-          p.el.style.pointerEvents = "none";
+      });
+
+      const HOVER_RADIUS = 60; // pixels — generous so users don't
+                                // need pixel-perfect aim
+      let hovered = null;
+      if (cursor.inside) {
+        let best = HOVER_RADIUS * HOVER_RADIUS;
+        for (let i = 0; i < labelEls.length; i++) {
+          const p = labelEls[i];
+          if (!p.onScreen) continue;
+          const dx = p.sx - cursor.x;
+          const dy = p.sy - cursor.y;
+          const d2 = dx * dx + dy * dy;
+          if (d2 < best) { best = d2; hovered = p; }
+        }
+      }
+
+      labelEls.forEach((p) => {
+        if (p === hovered) {
+          p.el.classList.remove("forge-3d-label-hidden");
+          p.el.classList.add("forge-3d-label-active");
         } else {
-          p.el.style.opacity = String(0.7 + depthFade * 0.3);
-          p.el.style.pointerEvents = "auto";
-          taken.push(p);
+          p.el.classList.add("forge-3d-label-hidden");
+          p.el.classList.remove("forge-3d-label-active");
         }
       });
 
@@ -1060,6 +1380,8 @@
       running = false;
       if (raf) cancelAnimationFrame(raf);
       document.removeEventListener("visibilitychange", onVisibility);
+      renderer.domElement.removeEventListener("pointermove", onPointerMove);
+      renderer.domElement.removeEventListener("pointerleave", onPointerLeave);
       ro.disconnect();
       controls.dispose();
       scene.traverse((obj) => {
