@@ -620,8 +620,13 @@ input[type="number"], select,
    where the SKIP button used to live, so the user's eye knows where to look. */
 .phase-brief-restore {
   position: absolute;
+  /* Anchor to the BOTTOM-LEFT of the canvas instead of the top so it
+   * never overlaps a wrapped toolbar. The hint strip and 3D legend
+   * are stacked here too — `forge-3d-hint` / `forge-3d-legend` use
+   * the same vertical region but `bottom: 14px`, so we bump the
+   * tutorial chip to bottom: 50px to clear them. */
   left: 18px;
-  top: 58px;
+  bottom: 50px;
   z-index: 7;
   display: inline-flex;
   align-items: center;
@@ -1807,6 +1812,39 @@ select option {
   background: rgba(51, 251, 211, 0.15);
   border-color: var(--accent, #33fbd3);
   color: var(--accent, #33fbd3);
+}
+
+/* Segmented "2D / 3D" pill — visually groups the dim toggle so it
+ * reads as a single control instead of two adjacent buttons. */
+.floor-dim-segment {
+  display: inline-flex;
+  border: 1px solid var(--border, #23272d);
+  border-radius: 4px;
+  overflow: hidden;
+  background: rgba(8, 9, 11, 0.92);
+}
+.floor-dim-segment .floor-btn {
+  border: 0 !important;
+  border-radius: 0 !important;
+  margin: 0;
+  padding: 5px 10px;
+}
+.floor-dim-segment .floor-btn + .floor-btn {
+  border-left: 1px solid var(--border, #23272d) !important;
+}
+.floor-dim-segment .floor-btn.active {
+  background: rgba(51, 251, 211, 0.18);
+  color: var(--accent, #33fbd3);
+}
+
+/* In 3D mode the toolbar is intentionally compact (single row). The
+ * 2D toolbar can wrap if necessary because the SVG underneath
+ * provides its own visual structure. */
+.floor-toolbar-3d {
+  flex-wrap: nowrap;
+}
+.floor-toolbar-2d {
+  flex-wrap: wrap;
 }
 
 /* ──────────────────────────────────────────────────────────────────

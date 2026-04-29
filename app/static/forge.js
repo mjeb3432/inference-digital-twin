@@ -1524,6 +1524,13 @@
       renderCenterCanvas();
       return;
     }
+    if (action === "recenter-3d") {
+      /* Only meaningful when the 3D scene is mounted. */
+      if (ui.forge3d && typeof ui.forge3d.recenter === "function") {
+        ui.forge3d.recenter();
+      }
+      return;
+    }
     if (action === "fullscreen") {
       onToggleImmersive();
       return;
@@ -3548,13 +3555,24 @@
       racks,
       networkRows,
       phase,
-      /* Pass the user's actual decisions so the 3D scene can adapt
-       * its outdoor power yard + cooling plant + rack styling. */
+      /* Pass every decision the user has locked in. The 3D scene
+       * uses these to gate equipment progressively across Phases
+       * 1-8 — Phase 1 shows just the empty site + sketched building
+       * shell, Phase 2 lights up the substation and any chosen
+       * power-yard equipment, Phase 3 places fiber/MMR risers,
+       * Phase 4 builds the cooling plant + interior rooms, Phase 5
+       * fills the data hall with racks, Phase 6 hangs the spine,
+       * Phase 7 lights the DCIM telemetry, Phase 8 turns the
+       * facility "live" with full lighting. */
       powerMix: { ...facilityState.power.sources },
       coolingType: facilityState.facility.coolingType || "air",
       targetMw: ui.derived.targetMw || facilityState.power.targetMW || 10,
       locationType: facilityState.site.locationType || "rural",
       gpuModel: facilityState.compute.gpuModel || "h100",
+      fiberCarriers: (facilityState.fiber && facilityState.fiber.carriers) || [],
+      developerType: facilityState.facility.developerType || null,
+      monitoringApproach: facilityState.dcim.monitoringApproach || null,
+      cityLabel: ui.derived.cityLabel || null,
     }).then((handle) => {
       ui.forge3d = handle;
       const loading = document.getElementById("forge3dLoading");
@@ -4002,36 +4020,57 @@
   function renderFloorToolbar() {
     const scalePreset = Object.prototype.hasOwnProperty.call(SCALE_PRESETS, ui.canvas.scalePreset) ? ui.canvas.scalePreset : "fit";
     const is3d = ui.canvas.dimensionMode === "3d";
-    /* 3D is now available at every phase. Earlier phases just show a
-     * partially-populated facility (e.g. no racks at Phase 1, no
-     * gensets if the user hasn't chosen gas in Phase 2 yet). The
-     * outdoor power yard, building shell, and zone labels make the
-     * 3D model legible even before compute decisions land. */
-    const threeDAvailable = true;
+
+    /* In 3D mode the SVG-specific tools (zoom controls, scale select,
+     * SVG export, layer presets) are irrelevant — they just clutter
+     * the toolbar and force it to wrap to a second row that lands on
+     * top of the SHOW TUTORIAL chip. So the 3D toolbar is intentionally
+     * minimal: dim toggle + recenter + fullscreen. The 2D toolbar
+     * keeps the full blueprint controls. */
+    if (is3d) {
+      return `
+        <div class="floor-toolbar floor-toolbar-3d">
+          <div class="floor-toolbar-group">
+            <div class="floor-dim-segment" role="tablist" aria-label="View mode">
+              <button class="ghost-button floor-btn ${!is3d ? "active" : ""}" type="button" role="tab" aria-selected="${!is3d}" data-canvas-action="dim-mode" data-dim="2d">2D PLAN</button>
+              <button class="ghost-button floor-btn ${is3d ? "active" : ""}" type="button" role="tab" aria-selected="${is3d}" data-canvas-action="dim-mode" data-dim="3d">3D MODEL</button>
+            </div>
+          </div>
+          <div class="floor-toolbar-group">
+            <button class="ghost-button floor-btn" type="button" data-canvas-action="recenter-3d" title="Reset camera">⟲ RECENTER</button>
+            <button class="ghost-button floor-btn" type="button" data-canvas-action="fullscreen" title="Fullscreen">⤢ FULLSCREEN</button>
+          </div>
+        </div>
+      `;
+    }
+
+    /* 2D blueprint toolbar — keeps the full architectural controls. */
     return `
-      <div class="floor-toolbar">
+      <div class="floor-toolbar floor-toolbar-2d">
         <div class="floor-toolbar-group">
           <button class="ghost-button floor-btn" type="button" data-canvas-action="toggle-layers">☰ LAYERS ▾</button>
-          <button class="ghost-button floor-btn" type="button" data-canvas-action="preset-view" data-preset-key="site">SITE PLAN</button>
-          <button class="ghost-button floor-btn" type="button" data-canvas-action="preset-view" data-preset-key="electrical">ELECTRICAL</button>
-          <button class="ghost-button floor-btn" type="button" data-canvas-action="preset-view" data-preset-key="cooling">COOLING</button>
-          <button class="ghost-button floor-btn" type="button" data-canvas-action="preset-view" data-preset-key="network">NETWORK</button>
+          <button class="ghost-button floor-btn" type="button" data-canvas-action="preset-view" data-preset-key="site">SITE</button>
+          <button class="ghost-button floor-btn" type="button" data-canvas-action="preset-view" data-preset-key="electrical">ELEC</button>
+          <button class="ghost-button floor-btn" type="button" data-canvas-action="preset-view" data-preset-key="cooling">COOL</button>
+          <button class="ghost-button floor-btn" type="button" data-canvas-action="preset-view" data-preset-key="network">NET</button>
         </div>
         <div class="floor-toolbar-group">
-          <button class="ghost-button floor-btn floor-zoom" type="button" data-canvas-action="zoom-out" ${is3d ? "disabled" : ""}>−</button>
-          <select class="floor-scale-select" data-canvas-action="scale-select" ${is3d ? "disabled" : ""}>
+          <button class="ghost-button floor-btn floor-zoom" type="button" data-canvas-action="zoom-out">−</button>
+          <select class="floor-scale-select" data-canvas-action="scale-select">
             <option value="1:50" ${scalePreset === "1:50" ? "selected" : ""}>1:50</option>
             <option value="1:100" ${scalePreset === "1:100" ? "selected" : ""}>1:100</option>
             <option value="1:200" ${scalePreset === "1:200" ? "selected" : ""}>1:200</option>
             <option value="fit" ${scalePreset === "fit" ? "selected" : ""}>FIT</option>
           </select>
-          <button class="ghost-button floor-btn floor-zoom" type="button" data-canvas-action="zoom-in" ${is3d ? "disabled" : ""}>+</button>
+          <button class="ghost-button floor-btn floor-zoom" type="button" data-canvas-action="zoom-in">+</button>
         </div>
         <div class="floor-toolbar-group">
-          <button class="ghost-button floor-btn ${!is3d ? "active" : ""}" type="button" data-canvas-action="dim-mode" data-dim="2d">2D</button>
-          <button class="ghost-button floor-btn ${is3d ? "active" : ""}" type="button" data-canvas-action="dim-mode" data-dim="3d" ${threeDAvailable ? "" : "disabled title=\"Available from Phase 5+\""}>3D</button>
-          <button class="ghost-button floor-btn" type="button" data-canvas-action="fullscreen">⤢ FULLSCREEN</button>
-          <button class="ghost-button floor-btn" type="button" data-canvas-action="export-drawing" ${is3d ? "disabled" : ""}>↓ EXPORT SVG</button>
+          <div class="floor-dim-segment" role="tablist" aria-label="View mode">
+            <button class="ghost-button floor-btn ${!is3d ? "active" : ""}" type="button" role="tab" aria-selected="${!is3d}" data-canvas-action="dim-mode" data-dim="2d">2D</button>
+            <button class="ghost-button floor-btn ${is3d ? "active" : ""}" type="button" role="tab" aria-selected="${is3d}" data-canvas-action="dim-mode" data-dim="3d">3D</button>
+          </div>
+          <button class="ghost-button floor-btn" type="button" data-canvas-action="fullscreen" title="Fullscreen">⤢</button>
+          <button class="ghost-button floor-btn" type="button" data-canvas-action="export-drawing" title="Export SVG">↓</button>
         </div>
       </div>
     `;

@@ -117,13 +117,41 @@
       powerMix = { fom: 100, gas: 0, solar: 0, wind: 0, smr: 0 },
       coolingType = "air",
       targetMw = 10,
-      /* New: drives location-type adaptations (urban surroundings,
-       * rural greenery, repurposed-industrial brick palette). */
       locationType = "rural",
-      /* New: drives rack styling — Blackwell racks are denser/taller,
-       * immersion tanks replace the standing racks entirely. */
       gpuModel = "h100",
+      fiberCarriers = [],
+      developerType = null,
+      monitoringApproach = null,
+      cityLabel = null,
     } = opts;
+
+    /* Phase gating helpers — reused throughout the renderer to decide
+     * which equipment is visible. The 3D model "builds" in lockstep
+     * with the user advancing through Stages 1–8:
+     *   ≥1  site grass + perimeter setback always visible
+     *   ≥2  building wall outline + outdoor energy yard
+     *   ≥3  fiber risers + MMR shell shape
+     *   ≥4  building roof + interior rooms + rooftop chillers + CRAH
+     *   ≥5  racks in the data hall (immersion tanks for immersion)
+     *   ≥6  network spine HDA + ceiling cables
+     *   ≥7  DCIM telemetry pulse on rack tops
+     *   ≥8  fully lit "facility online" mint glow
+     */
+    const showBuilding   = phase >= 2;
+    const showRoof       = phase >= 4;
+    const showInterior   = phase >= 4;
+    const showCooling    = phase >= 4;
+    const showFiber      = phase >= 3;
+    const showRacks      = phase >= 5;
+    const showSpine      = phase >= 6;
+    const showTelemetry  = phase >= 7;
+    const fullyOnline    = phase >= 8;
+
+    /* Collected labels — populated as we add each piece of equipment
+     * and rendered to HTML overlays at the end of mount. Declared up
+     * here so both the Phase-1 stake-out and the deeper interior code
+     * can push to the same array. */
+    const labelTargets = [];
     if (!container || !plan) {
       throw new Error("mountForge3DInto requires { container, plan }");
     }
@@ -297,6 +325,10 @@
     }
 
     /* ---------- Building shell ---------- */
+    /* The slab pad is always visible (it represents the staked-out
+     * building footprint at Phase 1). The walls + roof appear from
+     * Phase 2 / Phase 4 respectively as the user procures power and
+     * approves construction. */
     const bldg = plan.building;
     const slabGeo = new THREE.BoxGeometry(sw(bldg.w) * 1.04, 0.4, sw(bldg.h) * 1.04);
     const slabMat = new THREE.MeshStandardMaterial({
@@ -307,40 +339,67 @@
     slab.receiveShadow = true;
     worldGroup.add(slab);
 
-    /* Translucent building walls so we can still see the room layout
-     * inside. Wall colour is location-aware: repurposed industrial
-     * sites get a warm brick tone, urban sites get cool gray glass,
-     * rural/campus default to the mint blueprint look. */
-    const wallPal = locationType === "repurpose" ? { tint: 0xa8674a, edge: 0xc88860 }
-                  : locationType === "urban" ? { tint: 0x6dd6ff, edge: 0x6dd6ff }
-                  : { tint: 0x33fbd3, edge: 0x33fbd3 };
-    const wallMat = new THREE.MeshStandardMaterial({
-      color: wallPal.tint,
-      transparent: true,
-      opacity: locationType === "repurpose" ? 0.18 : 0.04,
-      side: THREE.DoubleSide,
-      roughness: locationType === "repurpose" ? 0.85 : 0.4,
-      metalness: 0.2,
-    });
-    const wallEdgeMat = new THREE.LineBasicMaterial({ color: wallPal.edge, transparent: true, opacity: 0.55 });
-    const wallGeo = new THREE.BoxGeometry(sw(bldg.w), BUILDING_HEIGHT, sw(bldg.h));
-    const wallMesh = new THREE.Mesh(wallGeo, wallMat);
-    wallMesh.position.y = BUILDING_HEIGHT / 2;
-    worldGroup.add(wallMesh);
-    const wallEdges = new THREE.LineSegments(new THREE.EdgesGeometry(wallGeo), wallEdgeMat);
-    wallEdges.position.copy(wallMesh.position);
-    worldGroup.add(wallEdges);
+    /* Phase-1 stake-out marker: a thin mint outline rectangle on the
+     * pad so the user sees where the building WILL go before the
+     * walls go up. Hidden once the walls render at Phase 2+. */
+    if (!showBuilding) {
+      const outlineGeo = new THREE.EdgesGeometry(new THREE.BoxGeometry(sw(bldg.w), 0.05, sw(bldg.h)));
+      const outlineMat = new THREE.LineDashedMaterial({
+        color: 0x33fbd3, dashSize: 0.6, gapSize: 0.4, transparent: true, opacity: 0.6,
+      });
+      const outline = new THREE.LineSegments(outlineGeo, outlineMat);
+      outline.computeLineDistances();
+      outline.position.y = 0.05;
+      worldGroup.add(outline);
+      labelTargets.push({
+        x: 0, y: 1, z: 0,
+        title: "BUILDING FOOTPRINT",
+        sub: "Phase 1 stake-out",
+        kind: "compute",
+      });
+    }
 
-    /* Subtle building roof so the user sees a closed envelope.
-     * Slightly inset so the rooftop chillers (added later) sit on it. */
-    const roofGeo = new THREE.BoxGeometry(sw(bldg.w) * 0.99, 0.3, sw(bldg.h) * 0.99);
-    const roofMat = new THREE.MeshStandardMaterial({
-      color: 0x0d1116, roughness: 0.85, metalness: 0.1,
-    });
-    const roof = new THREE.Mesh(roofGeo, roofMat);
-    roof.position.y = BUILDING_HEIGHT + 0.15;
-    roof.receiveShadow = true;
-    worldGroup.add(roof);
+    /* Translucent building walls. Phase 2+ — Phase 1 only shows the
+     * stake-out outline drawn above. Wall colour is location-aware. */
+    if (showBuilding) {
+      const wallPal = locationType === "repurpose" ? { tint: 0xa8674a, edge: 0xc88860 }
+                    : locationType === "urban" ? { tint: 0x6dd6ff, edge: 0x6dd6ff }
+                    : { tint: 0x33fbd3, edge: 0x33fbd3 };
+      /* Once the facility is fully online, walls glow a touch brighter. */
+      const wallOpacity = (locationType === "repurpose" ? 0.18 : 0.04) * (fullyOnline ? 1.6 : 1);
+      const wallMat = new THREE.MeshStandardMaterial({
+        color: wallPal.tint,
+        transparent: true,
+        opacity: wallOpacity,
+        side: THREE.DoubleSide,
+        roughness: locationType === "repurpose" ? 0.85 : 0.4,
+        metalness: 0.2,
+      });
+      const wallEdgeMat = new THREE.LineBasicMaterial({
+        color: wallPal.edge, transparent: true, opacity: showRoof ? 0.55 : 0.32,
+      });
+      const wallGeo = new THREE.BoxGeometry(sw(bldg.w), BUILDING_HEIGHT, sw(bldg.h));
+      const wallMesh = new THREE.Mesh(wallGeo, wallMat);
+      wallMesh.position.y = BUILDING_HEIGHT / 2;
+      worldGroup.add(wallMesh);
+      const wallEdges = new THREE.LineSegments(new THREE.EdgesGeometry(wallGeo), wallEdgeMat);
+      wallEdges.position.copy(wallMesh.position);
+      worldGroup.add(wallEdges);
+    }
+
+    /* Building roof — appears at Phase 4 once construction is approved.
+     * Until then we leave the building "open" so the user can see the
+     * coming-soon interior layout. */
+    if (showRoof) {
+      const roofGeo = new THREE.BoxGeometry(sw(bldg.w) * 0.99, 0.3, sw(bldg.h) * 0.99);
+      const roofMat = new THREE.MeshStandardMaterial({
+        color: 0x0d1116, roughness: 0.85, metalness: 0.1,
+      });
+      const roof = new THREE.Mesh(roofGeo, roofMat);
+      roof.position.y = BUILDING_HEIGHT + 0.15;
+      roof.receiveShadow = true;
+      worldGroup.add(roof);
+    }
 
     /* ---------- Floor grid inside building ---------- */
     const grid = new THREE.GridHelper(
@@ -352,14 +411,12 @@
     grid.position.y = 0.011;
     worldGroup.add(grid);
 
-    /* ---------- Indoor zones ---------- */
     /* Each room is a coloured floor pad + an optional taller "rack" of
      * generic equipment so the user perceives volume. The colours
      * encode function — green=mechanical/cooling, amber=electrical,
      * sky=MMR/network, mint=data hall (compute). */
 
     const roomDefs = [];
-    const labelTargets = [];
 
     function addZoneFloor(rect, color, opacity = 0.55) {
       const [wx, , wz] = svgToWorld(rect.x + rect.w / 2, rect.y + rect.h / 2);
@@ -374,8 +431,11 @@
       return { wx, wz, w: sw(rect.w), h: sw(rect.h) };
     }
 
+    /* Interior rooms — populated only at Phase 4+ (Facility
+     * Construction). Earlier phases just show the empty slab. */
+
     /* Mechanical (cooling plant) */
-    if (plan.rooms.mechanical) {
+    if (showInterior && plan.rooms.mechanical) {
       const mech = addZoneFloor(plan.rooms.mechanical, 0x12354b, 0.55);
       /* Pop a few CRAH unit columns inside */
       const crahMat = new THREE.MeshStandardMaterial({
@@ -401,7 +461,7 @@
     }
 
     /* Electrical (switchgear / MER) */
-    if (plan.rooms.electrical) {
+    if (showInterior && plan.rooms.electrical) {
       const ele = addZoneFloor(plan.rooms.electrical, 0x4b3413, 0.6);
       /* A row of busbar / switchgear cabinets */
       const sgMat = new THREE.MeshStandardMaterial({
@@ -424,8 +484,10 @@
       });
     }
 
-    /* MMR (Meet-Me Room / network entrance) */
-    if (plan.rooms.mmr) {
+    /* MMR (Meet-Me Room / network entrance). The shell shape lights
+     * up at Phase 3 (fiber procurement) so the user sees where their
+     * carriers will land before the rest of the interior is built. */
+    if (showFiber && plan.rooms.mmr) {
       const mmr = addZoneFloor(plan.rooms.mmr, 0x123a48, 0.7);
       /* Network rack stack */
       const nrMat = new THREE.MeshStandardMaterial({
@@ -444,8 +506,9 @@
       });
     }
 
-    /* Switchgear pad (outside building wall) */
-    if (plan.rooms.switchgear) {
+    /* Switchgear pad (outside building wall) — Phase 2+ since the
+     * substation is part of power procurement. */
+    if (showBuilding && plan.rooms.switchgear) {
       const sg = addZoneFloor(plan.rooms.switchgear, 0x3a2a13, 0.65);
       const tMat = new THREE.MeshStandardMaterial({
         color: 0x6a4a1a, roughness: 0.45, metalness: 0.5,
@@ -463,9 +526,11 @@
     }
 
     /* ---------- DATA HALL (compute) ---------- */
-    /* The full mint-glow inside the building. */
+    /* The mint-glow data hall floor pad lights up at Phase 4 (along
+     * with the rest of the interior). Racks themselves only spawn at
+     * Phase 5+ once GPU decisions are locked. */
     const dh = plan.rooms.dataHall;
-    if (dh) {
+    if (showInterior && dh) {
       const dhInfo = addZoneFloor(dh, 0x0a3935, 0.85);
       labelTargets.push({
         x: dhInfo.wx, y: RACK_HEIGHT + 2.5, z: dhInfo.wz,
@@ -509,7 +574,9 @@
       const isB200 = gpuKey.startsWith("b");
       const rackEmissive = isB200 ? 0x103020 : 0x041018;
 
-      if (slotCount > 0 && racks.installed > 0) {
+      /* Racks only spawn at Phase 5+ once compute decisions are
+       * locked. Earlier phases just show the empty data hall floor. */
+      if (showRacks && slotCount > 0 && racks.installed > 0) {
         const rackGeo = new THREE.BoxGeometry(1, rackH, 1);
         const rackMat = new THREE.MeshStandardMaterial({
           color: isImmersion ? 0x132a3a : 0x1a2026,
@@ -606,8 +673,37 @@
         }
       }
 
-      /* Spine / network overlay (Phase 6+) */
-      if (phase >= 6 && racks.clusters && racks.clusters.length > 0) {
+      /* Phase 7 — DCIM telemetry "scan plane". A faint mint disc
+       * sweeps across the floor of the data hall to signal that
+       * monitoring is hot. We attach it to ui.forge3d so the render
+       * loop can animate its phase. */
+      if (showTelemetry) {
+        const scanGeo = new THREE.PlaneGeometry(sw(dh.w) * 0.96, sw(dh.h) * 0.96);
+        const scanMat = new THREE.MeshBasicMaterial({
+          color: 0x33fbd3, transparent: true, opacity: 0.08, side: THREE.DoubleSide,
+        });
+        const scan = new THREE.Mesh(scanGeo, scanMat);
+        const [dx, , dz] = svgToWorld(dh.x + dh.w / 2, dh.y + dh.h / 2);
+        scan.position.set(dx, 0.16, dz);
+        scan.rotation.x = -Math.PI / 2;
+        scan.userData.kind = "dcim-scan";
+        worldGroup.add(scan);
+
+        /* Telemetry summary label */
+        const monLabel = monitoringApproach === "dcim-suite" ? "Full DCIM suite"
+          : monitoringApproach === "open-stack" ? "Open-source stack"
+          : "Telemetry online";
+        labelTargets.push({
+          x: dx, y: RACK_HEIGHT + 4.2, z: dz - sw(dh.h) * 0.35,
+          title: "DCIM TELEMETRY",
+          sub: monLabel,
+          kind: "network",
+        });
+      }
+
+      /* Spine / network overlay — Phase 6+ once the user has chosen
+       * fabric + node count. */
+      if (showSpine && racks.clusters && racks.clusters.length > 0) {
         const spineMat = new THREE.MeshStandardMaterial({
           color: 0x6dd6ff, emissive: 0x6dd6ff, emissiveIntensity: 0.7,
           roughness: 0.3, metalness: 0.6, transparent: true, opacity: 0.92,
@@ -634,10 +730,10 @@
     }
 
     /* ---------- ROOFTOP CHILLERS (cooling continued) ---------- */
-    /* Air-cooled facilities get a row of rooftop chillers; liquid /
-     * immersion get a smaller pump skid (visual only — power is set by
-     * the user's coolingType decision). */
-    if (plan.rooms.dataHall) {
+    /* Phase 4+ once the user has chosen a cooling type. Air-cooled
+     * facilities get a row of rooftop chillers; d2c gets fewer but
+     * larger units; immersion needs only a small heat-rejection skid. */
+    if (showCooling && plan.rooms.dataHall) {
       const chillerCount = coolingType === "immersion" ? 2
         : coolingType === "d2c" ? 4
         : 6;
@@ -881,10 +977,26 @@
     let running = true;
     let t0 = performance.now();
     const tmpVec = new THREE.Vector3();
+    /* Cache the DCIM scan plane once (if it exists) so the per-frame
+     * loop doesn't have to traverse the scene to find it. */
+    const scanPlane = (() => {
+      let found = null;
+      worldGroup.traverse((obj) => { if (obj.userData && obj.userData.kind === "dcim-scan") found = obj; });
+      return found;
+    })();
+
     function tick(t) {
       if (!running) return;
       const dt = (t - t0) / 1000;
-      rim.intensity = 1.4 + Math.sin(dt * 1.2) * 0.45;
+      /* Rim-light pulse intensity ramps with phase so an early-stage
+       * facility feels quieter than a fully-online Phase 8 build. */
+      const phaseGlow = fullyOnline ? 1.0 : (phase / 8) * 0.55;
+      rim.intensity = (1.0 + phaseGlow) + Math.sin(dt * 1.2) * 0.45;
+      /* Phase 7 telemetry scan: pulse the opacity sinusoidally between
+       * 4% and 16% so the user perceives a live monitoring overlay. */
+      if (scanPlane) {
+        scanPlane.material.opacity = 0.06 + (Math.sin(dt * 1.6) * 0.5 + 0.5) * 0.10;
+      }
       controls.update();
       renderer.render(scene, camera);
 
