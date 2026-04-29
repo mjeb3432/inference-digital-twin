@@ -1763,6 +1763,65 @@ select option {
   100% { transform: scale(1); opacity: 0.85; }
 }
 
+/* ──────────────────────────────────────────────────────────────────
+ * Hover-only floating label card — no always-on pins. The single
+ * card follows the cursor when an invisible hover-zone is hit by
+ * the raycaster.
+ * ────────────────────────────────────────────────────────────────── */
+.forge-3d-hover-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 6;
+}
+
+.forge-3d-hover-card {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform: translate(0, 0);
+  pointer-events: none;
+  font-family: var(--font-mono, "JetBrains Mono", monospace);
+  background: rgba(5, 7, 11, 0.94);
+  border: 1px solid rgba(51, 251, 211, 0.6);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.65), 0 0 12px rgba(51, 251, 211, 0.22);
+  padding: 7px 11px;
+  white-space: nowrap;
+  opacity: 1;
+  transition: opacity 0.12s ease;
+}
+
+.forge-3d-hover-card.forge-3d-hover-hidden {
+  opacity: 0;
+}
+
+.forge-3d-hover-title {
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  font-weight: 700;
+  color: var(--accent, #33fbd3);
+}
+
+.forge-3d-hover-sub {
+  font-size: 9.5px;
+  letter-spacing: 0.10em;
+  color: var(--dim, #a0a4ab);
+  text-transform: uppercase;
+  margin-top: 3px;
+}
+
+/* Per-kind border accent */
+.forge-3d-hover-card[data-kind="compute"]    { border-color: rgba(51, 251, 211, 0.7); }
+.forge-3d-hover-card[data-kind="cooling"]    { border-color: rgba(109, 214, 255, 0.7); }
+.forge-3d-hover-card[data-kind="cooling"] .forge-3d-hover-title { color: #6dd6ff; }
+.forge-3d-hover-card[data-kind="energy"]     { border-color: rgba(255, 209, 102, 0.7); }
+.forge-3d-hover-card[data-kind="energy"] .forge-3d-hover-title  { color: #ffd166; }
+.forge-3d-hover-card[data-kind="electrical"] { border-color: rgba(255, 154, 77, 0.7); }
+.forge-3d-hover-card[data-kind="electrical"] .forge-3d-hover-title { color: #ff9a4d; }
+.forge-3d-hover-card[data-kind="network"]    { border-color: rgba(182, 214, 255, 0.7); }
+.forge-3d-hover-card[data-kind="network"] .forge-3d-hover-title { color: #b6d6ff; }
+
 .forge-3d-label-pin {
   width: 6px;
   height: 6px;

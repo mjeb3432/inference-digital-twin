@@ -152,6 +152,19 @@
      * here so both the Phase-1 stake-out and the deeper interior code
      * can push to the same array. */
     const labelTargets = [];
+
+    /* Hoverable meshes — every "interesting" piece of equipment attaches
+     * its mesh + a label payload so the raycaster can resolve a precise
+     * hit when the cursor is over it. This is much cleaner than the
+     * old screen-space-proximity hover (which required always-on pin
+     * dots that cluttered the scene). One label = one card; the user
+     * sees nothing UI until they're directly over an asset. */
+    const hoverables = [];
+    function registerHoverable(mesh, payload) {
+      if (!mesh) return;
+      mesh.userData.forgeLabel = payload;
+      hoverables.push(mesh);
+    }
     if (!container || !plan) {
       throw new Error("mountForge3DInto requires { container, plan }");
     }
@@ -1151,21 +1164,39 @@
         }
       }
 
-      /* Phase 7 — DCIM telemetry "scan plane". A faint mint disc
-       * sweeps across the floor of the data hall to signal that
-       * monitoring is hot. We attach it to ui.forge3d so the render
-       * loop can animate its phase. */
+      /* Phase 7 — DCIM telemetry. Two visual layers:
+       *   1. A constant low-amplitude floor glow so the user sees
+       *      monitoring is "online" even at idle.
+       *   2. A periodic RADAR-STYLE radial scan: a ring expands from
+       *      the centre of the data hall every ~6 seconds. Marks the
+       *      moment a sweep passes through, much like a NOC's heartbeat.
+       */
       if (showTelemetry) {
+        const [dx, , dz] = svgToWorld(dh.x + dh.w / 2, dh.y + dh.h / 2);
+
+        /* Constant glow plane */
         const scanGeo = new THREE.PlaneGeometry(sw(dh.w) * 0.96, sw(dh.h) * 0.96);
         const scanMat = new THREE.MeshBasicMaterial({
           color: 0x33fbd3, transparent: true, opacity: 0.08, side: THREE.DoubleSide,
         });
         const scan = new THREE.Mesh(scanGeo, scanMat);
-        const [dx, , dz] = svgToWorld(dh.x + dh.w / 2, dh.y + dh.h / 2);
         scan.position.set(dx, 0.16, dz);
         scan.rotation.x = -Math.PI / 2;
         scan.userData.kind = "dcim-scan";
         worldGroup.add(scan);
+
+        /* Periodic radial scan ring — fades outward then resets */
+        const scanRingGeo = new THREE.RingGeometry(0.4, 0.6, 64);
+        const scanRingMat = new THREE.MeshBasicMaterial({
+          color: 0x33fbd3, transparent: true, opacity: 0.85,
+          side: THREE.DoubleSide, depthWrite: false,
+        });
+        const scanRing = new THREE.Mesh(scanRingGeo, scanRingMat);
+        scanRing.position.set(dx, 0.18, dz);
+        scanRing.rotation.x = -Math.PI / 2;
+        scanRing.userData.kind = "dcim-scan-ring";
+        scanRing.userData.maxRadius = Math.max(sw(dh.w), sw(dh.h)) * 0.48;
+        worldGroup.add(scanRing);
 
         /* Telemetry summary label */
         const monLabel = monitoringApproach === "dcim-suite" ? "Full DCIM suite"
@@ -1176,6 +1207,36 @@
           title: "DCIM TELEMETRY",
           sub: monLabel,
           kind: "network",
+          radius: 4,
+        });
+      }
+
+      /* In-row CDU (Cooling Distribution Unit) manifolds — appear
+       * once compute is installed AND the user picked a liquid
+       * cooling stack (d2c or immersion). Run sky-blue pipes along
+       * each rack row so the cooling path is obvious. */
+      if (showRacks && (coolingType === "d2c" || coolingType === "immersion") && racks.rowLabels) {
+        const cduMat = new THREE.MeshStandardMaterial({
+          color: 0x6dd6ff, emissive: 0x6dd6ff, emissiveIntensity: 0.55,
+          roughness: 0.3, metalness: 0.7,
+        });
+        racks.rowLabels.forEach((row) => {
+          const [rx, , rz] = svgToWorld(dh.x + dh.w / 2, row.cy);
+          const pipe = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.06, 0.06, sw(dh.w) * 0.9, 8),
+            cduMat
+          );
+          pipe.rotation.z = Math.PI / 2;
+          pipe.position.set(rx, RACK_HEIGHT * 0.95, rz);
+          worldGroup.add(pipe);
+        });
+        const [dx2, , dz2] = svgToWorld(dh.x + dh.w / 2, dh.y + dh.h / 2);
+        labelTargets.push({
+          x: dx2, y: RACK_HEIGHT * 0.95, z: dz2,
+          title: coolingType === "immersion" ? "IMMERSION LOOPS" : "DIRECT-TO-CHIP CDU",
+          sub: "Liquid cooling manifolds",
+          kind: "cooling",
+          radius: 5,
         });
       }
 
@@ -1205,6 +1266,113 @@
           worldGroup.add(cable);
         });
       }
+    }
+
+    /* ---------- UPS BATTERY SYSTEM ---------- */
+    /* The user picks a UPS technology in Phase 2 (VRLA / Li-Ion /
+     * Supercap). We render a row of battery cabinets immediately
+     * NEXT to the electrical room — that's where they really live in
+     * a Tier-3 facility. Cabinet count + emissive vary by ups type
+     * (faster response = brighter accent). */
+    if (showInterior && plan.rooms.electrical) {
+      const elec = plan.rooms.electrical;
+      const [eux, , euz] = svgToWorld(elec.x + elec.w + 12, elec.y + elec.h / 2);
+      const upsCount = 4;
+      const upsMat = new THREE.MeshStandardMaterial({
+        color: 0x1c4258, roughness: 0.45, metalness: 0.55,
+        emissive: 0x0a3548, emissiveIntensity: fullyOnline ? 0.7 : 0.45,
+      });
+      for (let i = 0; i < upsCount; i++) {
+        const ups = new THREE.Mesh(new THREE.BoxGeometry(0.6, 1.6, 1.0), upsMat);
+        ups.position.set(eux + (i - upsCount / 2) * 0.75, 0.85, euz);
+        ups.castShadow = true;
+        worldGroup.add(ups);
+      }
+      labelTargets.push({
+        x: eux, y: 2.4, z: euz,
+        title: "UPS BATTERY",
+        sub: "Ride-through energy storage",
+        kind: "electrical",
+        radius: 3,
+      });
+    }
+
+    /* ---------- FIBER ENTRY + IXP UPLINK ---------- */
+    /* Phase 3+ visualises the network entry path the user committed
+     * to. Two physical signals:
+     *   • Underground glowing fiber strand from the parcel edge to
+     *     the MMR room (sky-blue, runs just below grade so it reads
+     *     as "buried duct").
+     *   • A long uplink line that extends BEYOND the parcel toward
+     *     where the IXP region lives (off-screen). Reads as the
+     *     wide-area carrier handoff.
+     *   • A fiber junction box at the parcel edge — a small mint
+     *     pillar with hover label "EXTERNAL CONNECTIVITY".
+     */
+    if (showFiber && plan.rooms.mmr && plan.site) {
+      const mmr = plan.rooms.mmr;
+      const site = plan.site;
+      const [mx, , mz] = svgToWorld(mmr.x + mmr.w / 2, mmr.y + mmr.h / 2);
+      /* Junction sits at the SE corner of the parcel — outside the
+       * fence line where carriers actually drop fiber. */
+      const [jx, , jz] = svgToWorld(site.x + site.w * 0.92, site.y + site.h * 0.5);
+
+      /* Underground fiber duct (slightly below grade) */
+      const fiberMat = new THREE.MeshBasicMaterial({
+        color: 0x6dd6ff, transparent: true, opacity: 0.92,
+      });
+      const fiberPoints = [
+        new THREE.Vector3(jx, 0.05, jz),
+        new THREE.Vector3((jx + mx) / 2, 0.05, (jz + mz) / 2),
+        new THREE.Vector3(mx, 0.05, mz),
+      ];
+      const fiberGeo = new THREE.BufferGeometry().setFromPoints(fiberPoints);
+      const fiberLine = new THREE.Line(fiberGeo, fiberMat);
+      worldGroup.add(fiberLine);
+
+      /* Carrier junction box */
+      const jbMat = new THREE.MeshStandardMaterial({
+        color: 0x6dd6ff, emissive: 0x6dd6ff, emissiveIntensity: 0.7,
+        roughness: 0.3, metalness: 0.7,
+      });
+      const junction = new THREE.Mesh(new THREE.BoxGeometry(0.7, 1.4, 0.7), jbMat);
+      junction.position.set(jx, 0.7, jz);
+      junction.castShadow = true;
+      worldGroup.add(junction);
+      labelTargets.push({
+        x: jx, y: 1.8, z: jz,
+        title: "FIBER ENTRY",
+        sub: `${(fiberCarriers && fiberCarriers.length) || 0} carriers · underground`,
+        kind: "network",
+        radius: 2.5,
+      });
+
+      /* IXP uplink — long emissive line extending well off-parcel.
+       * The far endpoint isn't a real city, just a beacon at the
+       * world edge so the user perceives "this fiber leaves the
+       * facility and goes to the IXP". */
+      const ixpFar = new THREE.Vector3(jx + 60, 1.0, jz + 16);
+      const ixpMat = new THREE.LineBasicMaterial({
+        color: 0xb6d6ff, transparent: true, opacity: 0.6,
+      });
+      const ixpGeo = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(jx, 0.7, jz),
+        ixpFar,
+      ]);
+      const ixpLine = new THREE.Line(ixpGeo, ixpMat);
+      worldGroup.add(ixpLine);
+
+      const beaconMat = new THREE.MeshBasicMaterial({ color: 0xb6d6ff });
+      const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.45, 12, 12), beaconMat);
+      beacon.position.copy(ixpFar);
+      worldGroup.add(beacon);
+      labelTargets.push({
+        x: ixpFar.x, y: ixpFar.y + 1.4, z: ixpFar.z,
+        title: "IXP UPLINK",
+        sub: "Wide-area carrier handoff",
+        kind: "network",
+        radius: 2.5,
+      });
     }
 
     /* ---------- ROOFTOP CHILLERS (cooling continued) ---------- */
@@ -1318,26 +1486,66 @@
       });
     }
 
-    /* Wind turbine marker */
+    /* Wind turbine marker — placement is location-aware. Urban
+     * campuses can't have a turbine in the middle of city blocks,
+     * so we render the turbine FAR off-parcel toward the upper-left
+     * and run a sky-blue uplink line from the substation to it.
+     * Rural / repurposed / campus keep the turbine close-by. */
     if (powerMix.wind > 0) {
-      const wx = yardX - sw(120);
-      const wz = yardZ0 - sw(80);
+      let wx, wz, turbineH = 8.0;
+      if (locationType === "urban") {
+        wx = yardX - sw(280);
+        wz = yardZ0 - sw(220);
+        turbineH = 12.0; // taller — these are mid-distance utility-scale towers
+      } else if (locationType === "campus") {
+        wx = yardX - sw(180);
+        wz = yardZ0 - sw(120);
+        turbineH = 10.0;
+      } else {
+        wx = yardX - sw(120);
+        wz = yardZ0 - sw(80);
+      }
       const towerMat = new THREE.MeshStandardMaterial({ color: 0xc8d3e0, roughness: 0.5, metalness: 0.6 });
-      const tower = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.28, 8.0, 12), towerMat);
-      tower.position.set(wx, 4.0, wz);
+      const tower = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.28, turbineH, 12), towerMat);
+      tower.position.set(wx, turbineH / 2, wz);
       tower.castShadow = true;
       worldGroup.add(tower);
       const hub = new THREE.Mesh(new THREE.SphereGeometry(0.35, 12, 12), towerMat);
-      hub.position.set(wx, 8.0, wz);
+      hub.position.set(wx, turbineH, wz);
       worldGroup.add(hub);
-      const blade = new THREE.Mesh(new THREE.BoxGeometry(0.1, 3.6, 0.4), towerMat);
-      blade.position.set(wx, 9.6, wz);
-      worldGroup.add(blade);
+      /* Three blades, 120° apart so it reads as a real turbine */
+      for (let b = 0; b < 3; b++) {
+        const blade = new THREE.Mesh(
+          new THREE.BoxGeometry(0.08, turbineH * 0.5, 0.5),
+          towerMat
+        );
+        blade.position.set(wx, turbineH + turbineH * 0.18, wz);
+        blade.rotation.z = (b * 2 * Math.PI) / 3;
+        blade.userData.kind = "wind-blade";
+        worldGroup.add(blade);
+      }
+      /* PPA uplink line from the substation to the turbine, suggesting
+       * a utility-grid tie-in even though the turbine sits far away. */
+      if (plan.rooms.switchgear) {
+        const [tx, , tz] = svgToWorld(
+          plan.rooms.switchgear.x + plan.rooms.switchgear.w / 2,
+          plan.rooms.switchgear.y + plan.rooms.switchgear.h / 2
+        );
+        const ppaMat = new THREE.LineBasicMaterial({
+          color: 0xc8d3e0, transparent: true, opacity: 0.4,
+        });
+        const ppaGeo = new THREE.BufferGeometry().setFromPoints([
+          new THREE.Vector3(tx, 0.4, tz),
+          new THREE.Vector3(wx, turbineH * 0.6, wz),
+        ]);
+        worldGroup.add(new THREE.Line(ppaGeo, ppaMat));
+      }
       labelTargets.push({
-        x: wx, y: 10.5, z: wz,
+        x: wx, y: turbineH + 1.5, z: wz,
         title: "WIND PPA",
         sub: `${Math.round(powerMix.wind)}% wind contract`,
         kind: "energy",
+        radius: 4,
       });
     }
 
@@ -1399,60 +1607,105 @@
     compass.position.set(-sw(bldg.w) / 2 - 1.5, 0, -sw(bldg.h) / 2 - 1.5);
     worldGroup.add(compass);
 
-    /* ---------- HTML overlay labels (hover-only) ---------- */
-    /* Labels are intentionally hidden by default — they only appear
-     * when the user hovers near a labeled piece of equipment. We
-     * project every label position to screen space each frame, then
-     * the mousemove handler shows the closest label within a small
-     * pixel radius of the cursor and hides everything else. This
-     * keeps the scene visually quiet until the user wants info. */
-    const labelLayer = document.createElement("div");
-    labelLayer.className = "forge-3d-label-layer";
-    container.appendChild(labelLayer);
+    /* ---------- Hover-only label system (raycasting) ----------
+     *
+     * No always-on pins anywhere in the scene. The user sees a clean
+     * 3D model. When they hover OVER an actual piece of equipment,
+     * a label card pops up at their cursor.
+     *
+     * Implementation: for every entry in `labelTargets`, we create
+     * an INVISIBLE hover-zone Box mesh centred on the equipment.
+     * The zones are sized generously (~3-6 world units) so users
+     * don't need pixel-perfect aim. A Raycaster hit-tests the cursor
+     * against these zones each frame and the topmost hit's label
+     * is rendered as a single floating card following the cursor.
+     */
+    const hoverLayer = document.createElement("div");
+    hoverLayer.className = "forge-3d-hover-layer";
+    container.appendChild(hoverLayer);
 
-    /* Always-on tiny pin marker for every labeled object so the user
-     * knows which things have hover info — but the title/sub card is
-     * hidden until hover. The pin is a separate element from the card
-     * so we can keep the marker visible while the card is hidden. */
-    const labelEls = labelTargets.map((tgt) => {
-      const el = document.createElement("div");
-      /* Add the spawn-animation class for newly-mounted labels so they
-       * pop in instead of just appearing. The class auto-cleans via
-       * a setTimeout below since CSS animations don't auto-remove
-       * classes. */
-      el.className = `forge-3d-label forge-3d-label-${tgt.kind} forge-3d-label-spawn`;
-      setTimeout(() => el.classList.remove("forge-3d-label-spawn"), 700);
-      el.innerHTML = `
-        <div class="forge-3d-label-pin"></div>
-        <div class="forge-3d-label-card">
-          <div class="forge-3d-label-title">${escapeHtml(tgt.title)}</div>
-          <div class="forge-3d-label-sub">${escapeHtml(tgt.sub || "")}</div>
-        </div>
-      `;
-      labelLayer.appendChild(el);
-      return {
-        el,
-        target: tgt,
-        vec: new THREE.Vector3(tgt.x, tgt.y, tgt.z),
-        sx: 0, sy: 0, depth: 1, onScreen: false,
-      };
+    /* Single floating card — moved to follow the cursor when a hit is
+     * resolved. One DOM node beats 12 always-mounted elements + their
+     * per-frame projections. */
+    const hoverCard = document.createElement("div");
+    hoverCard.className = "forge-3d-hover-card forge-3d-hover-hidden";
+    hoverCard.innerHTML = `
+      <div class="forge-3d-hover-title"></div>
+      <div class="forge-3d-hover-sub"></div>
+    `;
+    hoverLayer.appendChild(hoverCard);
+    const hoverTitle = hoverCard.querySelector(".forge-3d-hover-title");
+    const hoverSub = hoverCard.querySelector(".forge-3d-hover-sub");
+
+    /* Build invisible hover-zone boxes — one per labelTarget, centred
+     * at its world position, sized by zone radius (defaults to 3 but
+     * label authors can pass a `radius` to widen tricky targets). */
+    const hoverZones = [];
+    labelTargets.forEach((tgt) => {
+      const radius = tgt.radius || 3.2;
+      const heightR = tgt.heightRadius || radius;
+      const geo = new THREE.BoxGeometry(radius * 2, heightR * 2, radius * 2);
+      const mat = new THREE.MeshBasicMaterial({
+        transparent: true, opacity: 0, depthWrite: false,
+      });
+      const zone = new THREE.Mesh(geo, mat);
+      zone.position.set(tgt.x, tgt.y, tgt.z);
+      zone.userData.forgeLabel = { title: tgt.title, sub: tgt.sub, kind: tgt.kind };
+      worldGroup.add(zone);
+      hoverZones.push(zone);
     });
+    /* Also include any meshes that explicitly registered themselves
+     * via registerHoverable (they get hit-tested directly, no zone). */
+    hoverables.forEach((m) => hoverZones.push(m));
 
-    /* Track cursor position relative to the canvas. mouseLeave hides
-     * any open label so the scene returns to a clean state when the
-     * user moves out of the canvas. */
-    let cursor = { x: -9999, y: -9999, inside: false };
+    const raycaster = new THREE.Raycaster();
+    const ndc = new THREE.Vector2();
+    let hoverHidden = true;
+    let cursorClient = { x: -9999, y: -9999, inside: false };
+
     function onPointerMove(e) {
       const r = renderer.domElement.getBoundingClientRect();
-      cursor.x = e.clientX - r.left;
-      cursor.y = e.clientY - r.top;
-      cursor.inside = true;
+      cursorClient.x = e.clientX - r.left;
+      cursorClient.y = e.clientY - r.top;
+      cursorClient.inside = true;
+      ndc.x = (cursorClient.x / r.width) * 2 - 1;
+      ndc.y = -(cursorClient.y / r.height) * 2 + 1;
     }
     function onPointerLeave() {
-      cursor.inside = false;
+      cursorClient.inside = false;
     }
     renderer.domElement.addEventListener("pointermove", onPointerMove);
     renderer.domElement.addEventListener("pointerleave", onPointerLeave);
+
+    function updateHoverCard() {
+      if (!cursorClient.inside) {
+        if (!hoverHidden) {
+          hoverCard.classList.add("forge-3d-hover-hidden");
+          hoverHidden = true;
+        }
+        return;
+      }
+      raycaster.setFromCamera(ndc, camera);
+      const hits = raycaster.intersectObjects(hoverZones, false);
+      const hit = hits.length ? hits[0] : null;
+      if (!hit || !hit.object.userData.forgeLabel) {
+        if (!hoverHidden) {
+          hoverCard.classList.add("forge-3d-hover-hidden");
+          hoverHidden = true;
+        }
+        return;
+      }
+      const label = hit.object.userData.forgeLabel;
+      hoverTitle.textContent = label.title || "";
+      hoverSub.textContent = label.sub || "";
+      hoverCard.dataset.kind = label.kind || "compute";
+      /* Position the card just below+right of the cursor */
+      hoverCard.style.transform = `translate(${(cursorClient.x + 14).toFixed(0)}px, ${(cursorClient.y + 14).toFixed(0)}px)`;
+      if (hoverHidden) {
+        hoverCard.classList.remove("forge-3d-hover-hidden");
+        hoverHidden = false;
+      }
+    }
 
     function escapeHtml(s) {
       return String(s == null ? "" : s)
@@ -1487,13 +1740,20 @@
     let running = true;
     let t0 = performance.now();
     const tmpVec = new THREE.Vector3();
-    /* Cache the DCIM scan plane once (if it exists) so the per-frame
-     * loop doesn't have to traverse the scene to find it. */
-    const scanPlane = (() => {
-      let found = null;
-      worldGroup.traverse((obj) => { if (obj.userData && obj.userData.kind === "dcim-scan") found = obj; });
-      return found;
-    })();
+    /* Cache the DCIM scan plane + radial scan ring once (if they
+     * exist) so the per-frame loop doesn't traverse the scene each
+     * frame. The ring drives the periodic radar-style sweep. */
+    let scanPlane = null;
+    let scanRing = null;
+    worldGroup.traverse((obj) => {
+      if (!obj.userData) return;
+      if (obj.userData.kind === "dcim-scan") scanPlane = obj;
+      else if (obj.userData.kind === "dcim-scan-ring") scanRing = obj;
+    });
+    /* Constants for the radial scan: full sweep every SCAN_PERIOD
+     * seconds; the ring expands from r=0.6 to r=maxRadius and fades
+     * opacity from 0.85 → 0 across the period. */
+    const SCAN_PERIOD = 6.0;
 
     function tick(t) {
       if (!running) return;
@@ -1502,63 +1762,29 @@
        * facility feels quieter than a fully-online Phase 8 build. */
       const phaseGlow = fullyOnline ? 1.0 : (phase / 8) * 0.55;
       rim.intensity = (1.0 + phaseGlow) + Math.sin(dt * 1.2) * 0.45;
-      /* Phase 7 telemetry scan: pulse the opacity sinusoidally between
-       * 4% and 16% so the user perceives a live monitoring overlay. */
+      /* Phase 7 telemetry scan — two animations running in parallel:
+       *   1. Pulse the constant glow plane sinusoidally (existing).
+       *   2. Drive the radial scan ring: every SCAN_PERIOD seconds it
+       *      starts at r=0.6, expands to maxRadius, and fades opacity
+       *      0.85 → 0. The ring reads as a NOC's heartbeat. */
       if (scanPlane) {
         scanPlane.material.opacity = 0.06 + (Math.sin(dt * 1.6) * 0.5 + 0.5) * 0.10;
+      }
+      if (scanRing) {
+        const phaseT = (dt % SCAN_PERIOD) / SCAN_PERIOD;
+        const maxR = scanRing.userData.maxRadius || 18;
+        const r = 0.6 + (maxR - 0.6) * phaseT;
+        /* Ring geometry doesn't easily resize; instead scale the mesh. */
+        scanRing.scale.setScalar(r / 0.6);
+        scanRing.material.opacity = 0.85 * (1 - phaseT);
       }
       controls.update();
       renderer.render(scene, camera);
 
-      /* Project every label to screen space, then reveal the one
-       * closest to the cursor (within HOVER_RADIUS px). All others
-       * stay hidden so the scene reads cleanly. */
-      const w = container.clientWidth || width;
-      const h = container.clientHeight || height;
-      labelEls.forEach((p) => {
-        tmpVec.copy(p.vec).project(camera);
-        p.sx = (tmpVec.x * 0.5 + 0.5) * w;
-        p.sy = (-tmpVec.y * 0.5 + 0.5) * h;
-        p.depth = tmpVec.z;
-        p.onScreen = tmpVec.z > -1 && tmpVec.z < 1
-          && p.sx > -50 && p.sx < w + 50
-          && p.sy > -50 && p.sy < h + 50;
-        /* Position the (possibly-hidden) element so the show/hide
-         * transition happens in place rather than from origin. */
-        p.el.style.transform = `translate(${p.sx.toFixed(1)}px, ${p.sy.toFixed(1)}px)`;
-      });
-
-      const HOVER_RADIUS = 95; // pixels — generous so users don't
-                                // need pixel-perfect aim. Always-on
-                                // pins give the visual target.
-      let hovered = null;
-      if (cursor.inside) {
-        let best = HOVER_RADIUS * HOVER_RADIUS;
-        for (let i = 0; i < labelEls.length; i++) {
-          const p = labelEls[i];
-          if (!p.onScreen) continue;
-          const dx = p.sx - cursor.x;
-          const dy = p.sy - cursor.y;
-          const d2 = dx * dx + dy * dy;
-          if (d2 < best) { best = d2; hovered = p; }
-        }
-      }
-
-      labelEls.forEach((p) => {
-        if (p === hovered) {
-          p.el.classList.add("forge-3d-label-active");
-        } else {
-          p.el.classList.remove("forge-3d-label-active");
-        }
-        /* Pin opacity fades with depth so back-of-scene pins don't
-         * compete with foreground ones. */
-        if (p.onScreen) {
-          const depthFade = 1 - Math.min(1, Math.max(0, (p.depth + 0.6) / 1.6));
-          p.el.style.opacity = String(0.55 + depthFade * 0.45);
-        } else {
-          p.el.style.opacity = "0";
-        }
-      });
+      /* Pure raycasting hover — no on-screen label projection. The
+       * single floating card follows the cursor when an invisible
+       * hover-zone is hit. */
+      updateHoverCard();
 
       raf = requestAnimationFrame(tick);
     }
@@ -1596,7 +1822,7 @@
       if (renderer.domElement.parentNode) {
         renderer.domElement.parentNode.removeChild(renderer.domElement);
       }
-      if (labelLayer.parentNode) labelLayer.parentNode.removeChild(labelLayer);
+      if (hoverLayer.parentNode) hoverLayer.parentNode.removeChild(hoverLayer);
     }
 
     return {
