@@ -53,40 +53,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def favicon() -> RedirectResponse:
         return RedirectResponse(url="/static/favicon.svg")
 
-    @app.get("/dashboard", response_class=HTMLResponse)
-    def dashboard(request: Request) -> HTMLResponse:
-        return templates.TemplateResponse(
-            request,
-            "dashboard.html",
-            {
-                "active_nav": "dashboard",
-                "title": "Rack Floor Dashboard",
-            },
-        )
-
-    @app.get("/control-room", response_class=HTMLResponse)
-    def control_room(request: Request) -> HTMLResponse:
-        return templates.TemplateResponse(
-            request,
-            "control-room.html",
-            {
-                "active_nav": "control-room",
-                "title": "Inference Fabric Control Room",
-            },
-        )
-
-    @app.get("/explorer", response_class=HTMLResponse)
-    def explorer(request: Request) -> HTMLResponse:
-        return templates.TemplateResponse(
-            request,
-            "explorer.html",
-            {
-                "active_nav": "explorer",
-                "body_class": "explorer-page",
-                "page_shell_class": "page-shell--full",
-                "title": "Explorer",
-            },
-        )
+    # ----------------------------------------------------------------
+    # MVP scope: /forge is the only user-facing page. The earlier
+    # /dashboard, /control-room, and /explorer routes (and their
+    # templates / static assets) were removed in the post-MVP
+    # cleanup — they had been hidden from the global nav for several
+    # releases and were never linked from the build flow. Server-side
+    # routes (/runs, /artifacts, /reports/*) remain because the
+    # orchestrator backend still uses them.
+    # ----------------------------------------------------------------
 
     # ----------------------------------------------------------------
     # /forge  — serves the React/Vite SPA from frontend/dist when

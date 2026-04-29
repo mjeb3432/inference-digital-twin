@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Comfortaa:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/static/intro.css?v=20260427a" />
-  <link rel="stylesheet" href="/static/forge.css?v=20260427a" />
+  <link rel="stylesheet" href="/static/forge.css?v=20260429u" />
   <link rel="stylesheet" href="/static/global-nav.css?v=20260425b" />
 </head>
 <body class="forge-page" data-active-nav="build">
@@ -22,8 +22,6 @@
     </a>
     <div class="global-nav-links">
       <a href="/forge" class="global-nav-link" data-nav="build">BUILD</a>
-      <a href="/dashboard" class="global-nav-link" data-nav="dashboard">DASHBOARD</a>
-      <a href="/control-room" class="global-nav-link" data-nav="control-room">CONTROL ROOM</a>
     </div>
     <div class="global-nav-meta">
       <span class="global-nav-status"><span class="led"></span>LIVE</span>
@@ -128,14 +126,26 @@
       if (!overlay) return;
 
       var SKIP_KEY = 'forge:intro:skip-forever:v1';
+      // Tracks whether the user has EVER entered the hall. Once true,
+      // future visits skip the intro automatically — clicking BUILD in
+      // the global nav and landing on /forge no longer replays the
+      // 4-second WebGL2 datacenter scan animation. (Only a manual
+      // localStorage clear or a reset-build action restores it.)
+      var SEEN_KEY = 'forge:intro:seen:v1';
       var skipCheckbox = document.getElementById('introSkipForever');
 
-      // Restore prior preference into the checkbox + auto-dismiss the
-      // intro immediately if the user previously asked us to skip it.
+      // Two reasons to skip the intro on load:
+      //   1. The user explicitly checked "Don't show this again" on a
+      //      prior visit (SKIP_KEY), or
+      //   2. The user has already entered the hall at least once during
+      //      this build session (SEEN_KEY). The intro is a *first-run*
+      //      experience; replaying it after every BUILD click is noise.
       var skipForever = false;
+      var alreadySeen = false;
       try { skipForever = window.localStorage.getItem(SKIP_KEY) === 'true'; } catch (_) {}
+      try { alreadySeen = window.localStorage.getItem(SEEN_KEY) === 'true'; } catch (_) {}
       if (skipCheckbox) skipCheckbox.checked = skipForever;
-      if (skipForever) {
+      if (skipForever || alreadySeen) {
         // Vanish the overlay synchronously — no animation. Saves the user
         // ~3 seconds of the intro on every return visit.
         overlay.dataset.state = 'gone';
@@ -156,6 +166,10 @@
           } else {
             window.localStorage.removeItem(SKIP_KEY);
           }
+          // Always mark the intro as "seen" so subsequent BUILD clicks
+          // jump straight into the Forge. The user's first ENTER THE
+          // HALL counts as their pre-roll; we don't replay it.
+          window.localStorage.setItem(SEEN_KEY, 'true');
         } catch (_) {}
         overlay.dataset.state = 'exiting';
         setTimeout(function () {
@@ -198,10 +212,9 @@
 
   <!-- WebGL2 intro (vanilla, no three.js dep) -->
   <script src="/static/intro.js?v=20260425c" defer></script>
-  <!-- Cross-page Forge state bridge (must load before forge.js) -->
-  <script src="/static/forge-state.js?v=20260425c" defer></script>
-  <script src="/static/forge.js?v=20260427a" defer></script>
-  <script src="/static/forge-zoom.js?v=20260424a" defer></script>
+  <!-- Three.js-driven 3D data centre — lazy-loads Three from CDN on first activation. -->
+  <script src="/static/forge-3d.js?v=20260429v" defer></script>
+  <script src="/static/forge.js?v=20260429v" defer></script>
 
   <div class="desktop-banner" role="status">BEST VIEWED ON DESKTOP (1024PX+)</div>
   <div class="forge-backdrop" aria-hidden="true"></div>
@@ -242,11 +255,7 @@
       <section class="left-panel terminal-panel">
         <h2>BUILD TERMINAL</h2>
         <div class="terminal-actions">
-          <button id="exportScenarioButton" class="ghost-button" type="button">EXPORT SCENARIO JSON</button>
-          <button id="importScenarioButton" class="ghost-button" type="button">IMPORT SCENARIO JSON</button>
-          <button id="exportEventLogButton" class="ghost-button" type="button">EXPORT EVENT LOG</button>
           <button id="resetBuildButton" class="ghost-button ghost-button-danger" type="button" title="Discard the current build and start a fresh facility from Phase 1">RESET BUILD</button>
-          <input id="importScenarioInput" type="file" accept=".json,application/json" hidden />
         </div>
         <div id="buildLog" class="build-log" aria-live="polite"></div>
       </section>
