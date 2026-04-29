@@ -237,53 +237,67 @@
     rim.position.set(0, CEILING_Y - 1, 0);
     scene.add(rim);
 
-    /* ---------- Sun (warm orange with glow halos) ---------- */
-    /* Bright orange sun with a hot inner core, an amber middle
-     * halo, and a deep red-orange outer corona. Positioned high in
-     * the upper-LEFT of the default camera frustum so it's always
-     * visible at the default orbit angle.
+    /* ---------- Sun (sprite-based soft orange glow) ---------- */
+    /* The sun is composed of a tiny solid core sphere plus a
+     * billboarded Sprite carrying a procedurally-drawn radial
+     * gradient. The Sprite always faces the camera so the corona
+     * reads as a soft halo instead of concentric ring boundaries
+     * (which is what nested SphereGeometry halos look like).
      *
-     * IMPORTANT: the sun is a static piece of scenery — the
+     * IMPORTANT: the sun is static scenery — the
      * OrbitControls.target stays anchored at the BUILDING (0, 12, 0)
-     * regardless of where the sun sits, so the user's POV never
-     * snaps to the sun. */
-    const sun = new THREE.Mesh(
-      new THREE.SphereGeometry(7, 32, 20),
-      new THREE.MeshBasicMaterial({ color: 0xffb168, transparent: true, opacity: 0.98 })
-    );
-    /* Lower altitude (y=42) so the full sun disk + halos sit
-     * comfortably in the upper third of the default frame instead
-     * of being clipped by the canvas top edge. */
-    sun.position.set(-65, 42, -55);
-    scene.add(sun);
+     * regardless of orbit, so the user's POV never snaps to the sun. */
+    function makeSunGlowTexture() {
+      const c = document.createElement("canvas");
+      c.width = 512; c.height = 512;
+      const x = c.getContext("2d");
+      const g = x.createRadialGradient(256, 256, 8, 256, 256, 250);
+      /* Hot bright core → warm orange → deep orange-red → fade */
+      g.addColorStop(0.00, "rgba(255, 245, 220, 1.00)");
+      g.addColorStop(0.04, "rgba(255, 195, 110, 0.95)");
+      g.addColorStop(0.12, "rgba(255, 140, 60,  0.78)");
+      g.addColorStop(0.30, "rgba(255, 100, 40,  0.42)");
+      g.addColorStop(0.55, "rgba(220, 70,  30,  0.18)");
+      g.addColorStop(0.85, "rgba(180, 55,  25,  0.05)");
+      g.addColorStop(1.00, "rgba(160, 50,  20,  0.00)");
+      x.fillStyle = g;
+      x.fillRect(0, 0, 512, 512);
+      const tex = new THREE.CanvasTexture(c);
+      tex.minFilter = THREE.LinearFilter;
+      tex.magFilter = THREE.LinearFilter;
+      return tex;
+    }
 
-    /* Three nested halos for a believable "warm orange glow" — each
-     * progressively wider + more transparent. BackSide rendering on
-     * the outer two makes them read as soft volumetric glow rather
-     * than solid spheres. */
-    const sunHaloInner = new THREE.Mesh(
-      new THREE.SphereGeometry(11, 28, 18),
-      new THREE.MeshBasicMaterial({ color: 0xff8a3c, transparent: true, opacity: 0.45, side: THREE.BackSide })
+    /* Hot solid core — small + bright. Pushed FAR into the
+     * upper-left distance so the sun reads as a real distant
+     * celestial body, not an in-frame prop. The further back, the
+     * less it competes with the building for the user's attention. */
+    const sunCore = new THREE.Mesh(
+      new THREE.SphereGeometry(3.2, 28, 18),
+      new THREE.MeshBasicMaterial({ color: 0xfff3c4 })
     );
-    sunHaloInner.position.copy(sun.position);
-    scene.add(sunHaloInner);
+    sunCore.position.set(-220, 130, -200);
+    scene.add(sunCore);
 
-    const sunHaloMid = new THREE.Mesh(
-      new THREE.SphereGeometry(18, 24, 16),
-      new THREE.MeshBasicMaterial({ color: 0xff6a1a, transparent: true, opacity: 0.22, side: THREE.BackSide })
+    /* Big billboarded glow sprite — the visible corona. Same
+     * world-unit scale; perspective makes it appear smaller from
+     * far away while still reading as a glowing sun. */
+    const sunGlowSprite = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: makeSunGlowTexture(),
+        transparent: true,
+        depthWrite: false,
+        opacity: 1.0,
+      })
     );
-    sunHaloMid.position.copy(sun.position);
-    scene.add(sunHaloMid);
+    sunGlowSprite.scale.set(110, 110, 1);
+    sunGlowSprite.position.copy(sunCore.position);
+    scene.add(sunGlowSprite);
 
-    const sunHaloOuter = new THREE.Mesh(
-      new THREE.SphereGeometry(28, 20, 14),
-      new THREE.MeshBasicMaterial({ color: 0xd44a1a, transparent: true, opacity: 0.10, side: THREE.BackSide })
-    );
-    sunHaloOuter.position.copy(sun.position);
-    scene.add(sunHaloOuter);
+    const sun = sunCore; // alias used elsewhere for repositioning
 
     /* Warm point light cast FROM the sun's position so the building
-     * and equipment pick up an orange glow on the sun-facing side. */
+     * and equipment pick up a warm rim on the sun-facing side. */
     const sunLight = new THREE.PointLight(0xffaa55, 0.45, 480, 1.5);
     sunLight.position.copy(sun.position);
     scene.add(sunLight);
@@ -300,31 +314,67 @@
      * banner texture — a slow Easter egg that floats around the
      * scene every ~80s.
      */
-    const cloudMat = new THREE.MeshBasicMaterial({
-      color: 0xc8d4e0, transparent: true, opacity: 0.55, depthWrite: false,
-    });
+    /* Soft cloud-puff texture — radial gradient so each puff has
+     * feathered edges instead of a hard sphere silhouette. This
+     * single texture is shared across all puffs (every cloud + the
+     * letterforms below) for cheap rendering. */
+    function makeCloudPuffTexture() {
+      const c = document.createElement("canvas");
+      c.width = 256; c.height = 256;
+      const x = c.getContext("2d");
+      const g = x.createRadialGradient(128, 128, 8, 128, 128, 122);
+      g.addColorStop(0.00, "rgba(252, 254, 255, 1.00)");
+      g.addColorStop(0.25, "rgba(232, 240, 250, 0.92)");
+      g.addColorStop(0.55, "rgba(200, 215, 232, 0.55)");
+      g.addColorStop(0.85, "rgba(180, 198, 218, 0.18)");
+      g.addColorStop(1.00, "rgba(170, 188, 210, 0.00)");
+      x.fillStyle = g;
+      x.fillRect(0, 0, 256, 256);
+      const tex = new THREE.CanvasTexture(c);
+      tex.minFilter = THREE.LinearFilter;
+      tex.magFilter = THREE.LinearFilter;
+      return tex;
+    }
+    const cloudPuffTexture = makeCloudPuffTexture();
+
+    /* A single cloud = a Group of sprite-based puffs. Each sprite
+     * always faces the camera so the cloud reads as soft 2D puffs
+     * even at orbit angles where 3D spheres would look like beads. */
+    function makePuff(scale, opacity) {
+      const sprite = new THREE.Sprite(
+        new THREE.SpriteMaterial({
+          map: cloudPuffTexture, transparent: true,
+          opacity: opacity, depthWrite: false,
+        })
+      );
+      sprite.scale.set(scale, scale, 1);
+      return sprite;
+    }
 
     const clouds = [];
     const CLOUD_COUNT = 14;
     for (let c = 0; c < CLOUD_COUNT; c++) {
       const cloud = new THREE.Group();
-      const puffs = 3 + (c % 3);
-      for (let p = 0; p < puffs; p++) {
-        /* Bigger puffs (6-10 units) so the clouds read clearly even
-         * at orbit-distance. Each cluster is a lumpy combination so
-         * the silhouette never looks like a perfect sphere stack. */
-        const r = 6 + ((p * 1.4) % 4) + (c % 2) * 1.4;
-        const puff = new THREE.Mesh(new THREE.SphereGeometry(r, 12, 10), cloudMat);
-        puff.position.set((p - puffs / 2) * 5.4, (p % 2 === 0 ? 0 : 1.0), (p * 0.7) % 2.2);
-        cloud.add(puff);
+      /* 5-8 overlapping puffs per cloud — wider than they are tall,
+       * a few smaller "tufts" stacked on top for the cumulus feel. */
+      const baseW = 14 + (c % 3) * 4;
+      const baseH = 6 + (c % 2) * 2;
+      const puffCount = 5 + (c % 4);
+      for (let p = 0; p < puffCount; p++) {
+        const t = p / Math.max(1, puffCount - 1);
+        /* Lay puffs along a slight arc so the silhouette has a
+         * cumulus-style hump in the middle, lower on the edges. */
+        const px = (t - 0.5) * baseW * (1.3 + (c % 2) * 0.2);
+        const py = Math.sin(t * Math.PI) * baseH * 0.8 + ((p * 7) % 3) * 0.4;
+        const pscale = 8 + Math.sin(t * Math.PI) * 6 + ((c + p) % 3) * 0.8;
+        cloud.add(makePuff(pscale, 0.78 - (p % 3) * 0.05));
+        const last = cloud.children[cloud.children.length - 1];
+        last.position.set(px, py, ((p * 0.7) % 2.2) - 1.0);
       }
-      /* Each cloud orbits at its own radius (110-200) and altitude
-       * (28-50). Closer + lower than before so they're visible from
-       * the default camera angle without orbiting up. */
       const angle0 = (c / CLOUD_COUNT) * Math.PI * 2 + (c * 0.31);
       const radius = 110 + (c * 13) % 90;
       const altitude = 28 + (c * 4.1) % 22;
-      const speed = 0.018 + (c % 4) * 0.006; // rad/s — full lap every ~60-110s
+      const speed = 0.018 + (c % 4) * 0.006; // rad/s
       cloud.userData = { angle: angle0, radius, altitude, speed };
       cloud.position.set(
         Math.cos(angle0) * radius,
@@ -335,61 +385,74 @@
       clouds.push(cloud);
     }
 
-    /* ---------- SIMPLY SILICON teaser cloud ---------- */
-    /* A flat plane with a CanvasTexture that draws the text
-     * "SIMPLY SILICON" in mint on a soft cloud-puff backdrop. The
-     * plane uses a `Sprite` so it always faces the camera (no need
-     * to billboard manually). Floats at a higher altitude on a
-     * slower orbit so it reads as a deliberate Easter egg. */
-    const teaserCanvas = document.createElement("canvas");
-    teaserCanvas.width = 1024;
-    teaserCanvas.height = 256;
-    const tctx = teaserCanvas.getContext("2d");
-    /* Soft cloud puff backdrop — radial gradient so edges feather. */
-    const grad = tctx.createRadialGradient(512, 128, 60, 512, 128, 480);
-    grad.addColorStop(0,   "rgba(212, 222, 232, 0.92)");
-    grad.addColorStop(0.45,"rgba(200, 212, 224, 0.70)");
-    grad.addColorStop(0.85,"rgba(190, 204, 218, 0.20)");
-    grad.addColorStop(1,   "rgba(190, 204, 218, 0.00)");
-    tctx.fillStyle = grad;
-    tctx.fillRect(0, 0, 1024, 256);
-    /* Tiny mint dot prefix to match the THE FORGE branding chip */
-    tctx.fillStyle = "#33fbd3";
-    tctx.beginPath();
-    tctx.arc(232, 132, 8, 0, Math.PI * 2);
-    tctx.fill();
-    /* Mint glow shadow for the wordmark */
-    tctx.shadowColor = "rgba(51, 251, 211, 0.65)";
-    tctx.shadowBlur = 22;
-    tctx.fillStyle = "#33fbd3";
-    tctx.font = "bold 92px 'JetBrains Mono', monospace";
-    tctx.textBaseline = "middle";
-    tctx.textAlign = "left";
-    tctx.fillText("SIMPLY SILICON", 254, 132);
-    /* Subtle subtitle under the wordmark */
-    tctx.shadowBlur = 0;
-    tctx.fillStyle = "rgba(160, 200, 220, 0.85)";
-    tctx.font = "26px 'JetBrains Mono', monospace";
-    tctx.fillText("AI INFRA, INDUSTRIALISED.", 254, 196);
-
-    const teaserTex = new THREE.CanvasTexture(teaserCanvas);
-    teaserTex.minFilter = THREE.LinearFilter;
-    teaserTex.magFilter = THREE.LinearFilter;
-    const teaserMat = new THREE.SpriteMaterial({
-      map: teaserTex, transparent: true, opacity: 0.95, depthWrite: false,
-    });
-    const teaserSprite = new THREE.Sprite(teaserMat);
-    /* The teaser sprite is sized in world units: 80 wide × 20 tall
-     * so the wordmark is legible at orbit distance. Slow drift
-     * (one lap every ~80s) at altitude 56 above the regular cloud
-     * layer so it reads as a special-feature banner. */
-    teaserSprite.scale.set(80, 20, 1);
-    teaserSprite.userData = {
-      angle: Math.PI * 0.25, radius: 150, altitude: 56, speed: 0.0078,
+    /* ---------- SIMPLY SILICON cloud (letters made of puffs) ----
+     *
+     * Instead of slapping text on a flat plane, we sample the
+     * "SIMPLY SILICON" string onto a 2D bitmap canvas, then walk
+     * every "lit" pixel and place a small cloud-puff sprite at
+     * each position. The result is an actual cloud-shaped
+     * formation that SPELLS the wordmark — letters made out of
+     * cloud puffs, not a billboard.
+     *
+     * The sample canvas is 800×128. We sample on an 8-pixel grid
+     * which gives roughly 100×16 ≈ 1600 candidate cells, of which
+     * the lit pixels become puff positions (a typical letter run
+     * uses ~250 puffs). */
+    const teaser = new THREE.Group();
+    const TEASER_TEXT = "SIMPLY  SILICON";
+    const sampleCanvas = document.createElement("canvas");
+    sampleCanvas.width = 800; sampleCanvas.height = 128;
+    const sctx = sampleCanvas.getContext("2d");
+    sctx.fillStyle = "#000";
+    sctx.fillRect(0, 0, 800, 128);
+    sctx.fillStyle = "#fff";
+    sctx.font = "bold 96px 'JetBrains Mono', monospace";
+    sctx.textBaseline = "middle";
+    sctx.textAlign = "center";
+    sctx.fillText(TEASER_TEXT, 400, 64);
+    const data = sctx.getImageData(0, 0, 800, 128).data;
+    /* Sample on an 8-pixel grid → ~100 × 16 candidate cells. Place
+     * one puff per "lit" cell, mapped into world units. */
+    const STEP = 8;
+    const W_WORLD = 70; // total cloud-letters width
+    const H_WORLD = 11; // total cloud-letters height
+    let puffsAdded = 0;
+    for (let py = 0; py < 128; py += STEP) {
+      for (let px = 0; px < 800; px += STEP) {
+        const idx = (py * 800 + px) * 4;
+        const lit = data[idx] > 128;
+        if (!lit) continue;
+        const wx = (px / 800 - 0.5) * W_WORLD;
+        const wy = (0.5 - py / 128) * H_WORLD;
+        /* Each letter-puff is small but slightly varied for an
+         * organic cloud look. */
+        const baseScale = 2.6 + ((px + py) % 6) * 0.2;
+        const puff = makePuff(baseScale, 0.88);
+        puff.position.set(wx, wy, ((px * 0.013) % 1.4) - 0.7);
+        teaser.add(puff);
+        puffsAdded += 1;
+      }
+    }
+    /* Plus a soft underlying "cloud body" — bigger fluffy puffs
+     * BEHIND the letters so the wordmark sits on a cumulus base. */
+    for (let i = 0; i < 8; i++) {
+      const t = i / 7;
+      const wx = (t - 0.5) * W_WORLD * 0.95;
+      const wy = -H_WORLD * 0.6 + Math.sin(t * Math.PI) * 1.2;
+      const back = makePuff(8 + Math.sin(t * Math.PI) * 4, 0.55);
+      back.position.set(wx, wy, -2.0);
+      teaser.add(back);
+    }
+    teaser.userData = {
+      angle: Math.PI * 0.6,
+      radius: 160,
+      altitude: 60,
+      speed: 0.012, // ~1 lap per ~9 minutes — slow enough to be a
+                    // discoverable easter egg, not a distraction
       teaser: true,
     };
-    scene.add(teaserSprite);
-    clouds.push(teaserSprite); // cloud orbit logic also moves it
+    scene.add(teaser);
+    clouds.push(teaser); // share the orbit-update logic
 
     /* Skybox-like sphere — gives a subtle horizon gradient instead
      * of a flat black background. Inside-out box with a vertical
@@ -2018,33 +2081,36 @@
 
       /* Clouds drift along circular orbits around the scene's Y
        * axis — each at its own radius / altitude / angular speed.
-       * The teaser sprite uses the same orbit math so the
-       * SIMPLY SILICON banner always faces the camera (Sprite). */
+       * The SIMPLY SILICON teaser cloud also yaws to face the
+       * camera so its letterforms always read forward, not
+       * mirrored when the camera orbits past it. */
       for (let i = 0; i < clouds.length; i++) {
         const cloud = clouds[i];
         const ud = cloud.userData;
         ud.angle += ud.speed * 0.016; // ~16ms frame → 0.016 of speed
         cloud.position.x = Math.cos(ud.angle) * ud.radius;
         cloud.position.z = Math.sin(ud.angle) * ud.radius;
-        /* Keep altitude stable; subtle bob so each cloud has its own
-         * gentle vertical wobble. */
         cloud.position.y = ud.altitude + Math.sin(dt * 0.4 + i) * 0.6;
+        if (ud.teaser) {
+          /* Yaw the teaser group around its own Y axis so the
+           * letterforms face whichever direction the camera is in.
+           * `Math.atan2` gives the angle from the cloud to the
+           * camera in the XZ plane; we yaw to that angle so the
+           * text is always readable forward. */
+          const dx = camera.position.x - cloud.position.x;
+          const dz = camera.position.z - cloud.position.z;
+          cloud.rotation.y = Math.atan2(dx, dz);
+        }
       }
 
-      /* Sun + halos subtle bobbing so the sky has barely-perceptible
-       * motion (like late-afternoon haze shimmer). All three halo
-       * spheres + the cast point light track the sun. */
-      const sunY = 42 + Math.sin(dt * 0.15) * 1.5;
+      /* Sun bobs ±2 world-units on Y at 0.15 Hz. The Sprite glow
+       * + cast point light track the core so they always stay
+       * pinned to it. Sprite opacity breathes for a haze-shimmer. */
+      const sunY = 130 + Math.sin(dt * 0.15) * 2.0;
       sun.position.y = sunY;
-      sunHaloInner.position.copy(sun.position);
-      sunHaloMid.position.copy(sun.position);
-      sunHaloOuter.position.copy(sun.position);
+      sunGlowSprite.position.copy(sun.position);
       sunLight.position.copy(sun.position);
-      /* Each halo breathes at a slightly different cadence for a
-       * "shimmer" effect (no two layers pulse together). */
-      sunHaloInner.material.opacity = 0.42 + Math.sin(dt * 0.5) * 0.06;
-      sunHaloMid.material.opacity   = 0.20 + Math.sin(dt * 0.35 + 1.2) * 0.05;
-      sunHaloOuter.material.opacity = 0.09 + Math.sin(dt * 0.25 + 2.4) * 0.03;
+      sunGlowSprite.material.opacity = 0.92 + Math.sin(dt * 0.4) * 0.06;
       controls.update();
       renderer.render(scene, camera);
 
