@@ -394,55 +394,67 @@
      * formation that SPELLS the wordmark — letters made out of
      * cloud puffs, not a billboard.
      *
-     * The sample canvas is 800×128. We sample on an 8-pixel grid
-     * which gives roughly 100×16 ≈ 1600 candidate cells, of which
-     * the lit pixels become puff positions (a typical letter run
-     * uses ~250 puffs). */
+     * The sample canvas is sized GENEROUSLY (1600 wide × 200 tall)
+     * with the text rendered at 88px so neither character
+     * "SIMPLY" nor "SILICON" gets clipped. We measure the actual
+     * text extent before drawing so the world-space mapping is
+     * tight to the letterforms. */
     const teaser = new THREE.Group();
     const TEASER_TEXT = "SIMPLY  SILICON";
     const sampleCanvas = document.createElement("canvas");
-    sampleCanvas.width = 800; sampleCanvas.height = 128;
+    sampleCanvas.width = 1600; sampleCanvas.height = 200;
     const sctx = sampleCanvas.getContext("2d");
     sctx.fillStyle = "#000";
-    sctx.fillRect(0, 0, 800, 128);
+    sctx.fillRect(0, 0, 1600, 200);
     sctx.fillStyle = "#fff";
-    sctx.font = "bold 96px 'JetBrains Mono', monospace";
+    sctx.font = "bold 110px 'JetBrains Mono', monospace";
     sctx.textBaseline = "middle";
     sctx.textAlign = "center";
-    sctx.fillText(TEASER_TEXT, 400, 64);
-    const data = sctx.getImageData(0, 0, 800, 128).data;
-    /* Sample on an 8-pixel grid → ~100 × 16 candidate cells. Place
+    /* Measure the text first so we know its actual width and can
+     * map letterforms to world space without clipping. */
+    const metrics = sctx.measureText(TEASER_TEXT);
+    const textW = Math.min(1500, Math.ceil(metrics.width));
+    sctx.fillText(TEASER_TEXT, 800, 100);
+    const data = sctx.getImageData(0, 0, 1600, 200).data;
+    /* Sample on a 7-pixel grid → ~225 × 28 candidate cells. Place
      * one puff per "lit" cell, mapped into world units. */
-    const STEP = 8;
-    const W_WORLD = 70; // total cloud-letters width
-    const H_WORLD = 11; // total cloud-letters height
-    let puffsAdded = 0;
-    for (let py = 0; py < 128; py += STEP) {
-      for (let px = 0; px < 800; px += STEP) {
-        const idx = (py * 800 + px) * 4;
-        const lit = data[idx] > 128;
-        if (!lit) continue;
-        const wx = (px / 800 - 0.5) * W_WORLD;
-        const wy = (0.5 - py / 128) * H_WORLD;
-        /* Each letter-puff is small but slightly varied for an
-         * organic cloud look. */
-        const baseScale = 2.6 + ((px + py) % 6) * 0.2;
-        const puff = makePuff(baseScale, 0.88);
-        puff.position.set(wx, wy, ((px * 0.013) % 1.4) - 0.7);
-        teaser.add(puff);
-        puffsAdded += 1;
+    const STEP = 7;
+    /* World extent scales with the actual rendered text width so
+     * "SIMPLY SILICON" fits the full word + a little breathing
+     * room. ~80 world units wide × 12 tall. */
+    const W_WORLD = 80;
+    const H_WORLD = 12;
+    /* Find horizontal extent of lit pixels so we can centre + scale
+     * the cloud tightly around the actual letterforms. */
+    let minX = 1600, maxX = 0, minY = 200, maxY = 0;
+    for (let py = 0; py < 200; py += STEP) {
+      for (let px = 0; px < 1600; px += STEP) {
+        if (data[(py * 1600 + px) * 4] > 128) {
+          if (px < minX) minX = px;
+          if (px > maxX) maxX = px;
+          if (py < minY) minY = py;
+          if (py > maxY) maxY = py;
+        }
       }
     }
-    /* Plus a soft underlying "cloud body" — bigger fluffy puffs
-     * BEHIND the letters so the wordmark sits on a cumulus base. */
-    for (let i = 0; i < 8; i++) {
-      const t = i / 7;
-      const wx = (t - 0.5) * W_WORLD * 0.95;
-      const wy = -H_WORLD * 0.6 + Math.sin(t * Math.PI) * 1.2;
-      const back = makePuff(8 + Math.sin(t * Math.PI) * 4, 0.55);
-      back.position.set(wx, wy, -2.0);
-      teaser.add(back);
+    const litW = Math.max(1, maxX - minX);
+    const litH = Math.max(1, maxY - minY);
+    for (let py = minY; py <= maxY; py += STEP) {
+      for (let px = minX; px <= maxX; px += STEP) {
+        const idx = (py * 1600 + px) * 4;
+        if (data[idx] <= 128) continue;
+        const wx = ((px - minX) / litW - 0.5) * W_WORLD;
+        const wy = (0.5 - (py - minY) / litH) * H_WORLD;
+        /* Each letter-puff is small but slightly varied for an
+         * organic cloud look. */
+        const baseScale = 2.4 + ((px + py) % 6) * 0.2;
+        const puff = makePuff(baseScale, 0.92);
+        puff.position.set(wx, wy, ((px * 0.013) % 1.4) - 0.7);
+        teaser.add(puff);
+      }
     }
+    /* No underlying "cloud body" — the user wants ONLY the letters
+     * visible, not a base of fluffy puffs underneath. */
     teaser.userData = {
       angle: Math.PI * 0.6,
       radius: 160,
