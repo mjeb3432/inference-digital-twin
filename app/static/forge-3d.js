@@ -463,18 +463,74 @@
           worldGroup.add(edges);
         }
       } else if (locationType === "repurpose") {
-        /* Warm brick-toned palette — also pop a couple of disused
-         * smokestacks at the edge for vibe. */
+        /* Repurposed industrial site — disused brick smokestacks + a
+         * couple of derelict warehouse blocks + rust-toned ground
+         * patches. Conveys "former industrial use, now retrofitted". */
         const stackMat = new THREE.MeshStandardMaterial({ color: 0x4a2a1a, roughness: 0.9 });
-        for (let i = 0; i < 2; i++) {
-          const ang = -1 + i * 2.0;
+        for (let i = 0; i < 3; i++) {
+          const ang = -1 + i * 1.4;
           const r = Math.max(sw(plan.site.w), sw(plan.site.h)) * 0.42;
           const tx = sx + Math.cos(ang) * r;
           const tz = sz + Math.sin(ang) * r;
-          const stack = new THREE.Mesh(new THREE.CylinderGeometry(0.45, 0.55, 7.0, 10), stackMat);
-          stack.position.set(tx, 3.5, tz);
+          const stack = new THREE.Mesh(new THREE.CylinderGeometry(0.4 + i * 0.1, 0.55, 7.0 + i * 1.5, 10), stackMat);
+          stack.position.set(tx, (7.0 + i * 1.5) / 2, tz);
           stack.castShadow = true;
           worldGroup.add(stack);
+        }
+        /* Derelict warehouse blocks */
+        const warehouseMat = new THREE.MeshStandardMaterial({
+          color: 0x4a3522, roughness: 0.95, metalness: 0.05,
+        });
+        const warehouseEdge = new THREE.LineBasicMaterial({ color: 0x6e5238 });
+        const positions = [
+          { x: sx - sw(plan.site.w) * 0.45, z: sz + sw(plan.site.h) * 0.35, w: 8, h: 5, d: 12 },
+          { x: sx + sw(plan.site.w) * 0.42, z: sz - sw(plan.site.h) * 0.38, w: 14, h: 4, d: 8 },
+        ];
+        positions.forEach((p) => {
+          const wh = new THREE.Mesh(new THREE.BoxGeometry(p.w, p.h, p.d), warehouseMat);
+          wh.position.set(p.x, p.h / 2, p.z);
+          wh.castShadow = true;
+          worldGroup.add(wh);
+          const e = new THREE.LineSegments(new THREE.EdgesGeometry(wh.geometry), warehouseEdge);
+          e.position.copy(wh.position);
+          worldGroup.add(e);
+        });
+      } else if (locationType === "campus") {
+        /* Campus-adjacent — render a few low office buildings on the
+         * far side of the parcel suggesting we're next to a corporate
+         * or university campus. Cleaner geometry, lighter palette. */
+        const officeMat = new THREE.MeshStandardMaterial({
+          color: 0x2a4055, roughness: 0.55, metalness: 0.2,
+        });
+        const officeEdge = new THREE.LineBasicMaterial({ color: 0x4a637c });
+        const offsets = [
+          { x: -sw(plan.site.w) * 0.55, z: sw(plan.site.h) * 0.35, w: 12, h: 5, d: 22 },
+          { x: -sw(plan.site.w) * 0.55, z: -sw(plan.site.h) * 0.05, w: 10, h: 6, d: 14 },
+          { x: sw(plan.site.w) * 0.55, z: sw(plan.site.h) * 0.4, w: 14, h: 4, d: 10 },
+        ];
+        offsets.forEach((p) => {
+          const m = new THREE.Mesh(new THREE.BoxGeometry(p.w, p.h, p.d), officeMat);
+          m.position.set(sx + p.x, p.h / 2, sz + p.z);
+          m.castShadow = true;
+          worldGroup.add(m);
+          const e = new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry), officeEdge);
+          e.position.copy(m.position);
+          worldGroup.add(e);
+        });
+        /* And a few ornamental trees near the campus edge */
+        const ornTreeMat = new THREE.MeshStandardMaterial({ color: 0x365e3f, roughness: 0.9 });
+        const ornTrunkMat = new THREE.MeshStandardMaterial({ color: 0x3d2615, roughness: 0.95 });
+        for (let i = 0; i < 8; i++) {
+          const ang = (i / 8) * Math.PI * 2;
+          const r = Math.max(sw(plan.site.w), sw(plan.site.h)) * 0.4;
+          const tx = sx + Math.cos(ang) * r;
+          const tz = sz + Math.sin(ang) * r;
+          const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.13, 1.0, 6), ornTrunkMat);
+          trunk.position.set(tx, 0.5, tz);
+          worldGroup.add(trunk);
+          const ball = new THREE.Mesh(new THREE.SphereGeometry(0.95, 10, 8), ornTreeMat);
+          ball.position.set(tx, 1.5, tz);
+          worldGroup.add(ball);
         }
       }
     }

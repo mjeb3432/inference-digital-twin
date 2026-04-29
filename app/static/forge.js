@@ -3789,11 +3789,15 @@
       <div class="canvas-shell ${stageClass}">
         <svg viewBox="0 0 ${MAP_VIEWBOX.w} ${MAP_VIEWBOX.h}" role="img" aria-label="Global map routing view">
           <defs>
-            <linearGradient id="reqGrad" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stop-color="#00e5ff"/><stop offset="100%" stop-color="#7c3aed"/></linearGradient>
-            <linearGradient id="resGrad" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stop-color="#7c3aed"/><stop offset="100%" stop-color="#10b981"/></linearGradient>
+            <!-- Map arcs use the Forge mint/sky palette so the global
+                 routing view matches the 3D model's visual vibe instead
+                 of the prior cyan→purple→emerald gradient that felt
+                 detached from the rest of the app. -->
+            <linearGradient id="reqGrad" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stop-color="#6dd6ff"/><stop offset="100%" stop-color="#33fbd3"/></linearGradient>
+            <linearGradient id="resGrad" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stop-color="#33fbd3"/><stop offset="100%" stop-color="#7bff9e"/></linearGradient>
           </defs>
 
-          <rect x="0" y="0" width="${MAP_VIEWBOX.w}" height="${MAP_VIEWBOX.h}" fill="#090e16"></rect>
+          <rect x="0" y="0" width="${MAP_VIEWBOX.w}" height="${MAP_VIEWBOX.h}" fill="#05070b"></rect>
           ${renderMapGraticule()}
           ${worldPaths}
           ${reqPaths}
@@ -3809,9 +3813,9 @@
 
           <g data-action="jump-floor" data-inspect-kind="dc" data-inspect-key="core">
             <circle class="dc-dot" cx="${dcx.toFixed(1)}" cy="${dcy.toFixed(1)}" r="7"></circle>
-            <circle cx="${dcx.toFixed(1)}" cy="${dcy.toFixed(1)}" r="16" fill="none" stroke="#00e5ff" stroke-width="1.5" opacity="0.6"></circle>
+            <circle cx="${dcx.toFixed(1)}" cy="${dcy.toFixed(1)}" r="16" fill="none" stroke="#33fbd3" stroke-width="1.5" opacity="0.6"></circle>
           </g>
-          <text x="${(dcx + 14).toFixed(1)}" y="${(dcy - 8).toFixed(1)}" fill="#bfeaff" font-size="8">${facilityLabel}</text>
+          <text x="${(dcx + 14).toFixed(1)}" y="${(dcy - 8).toFixed(1)}" fill="#33fbd3" font-size="8" letter-spacing="0.12em">${facilityLabel}</text>
 
           <g id="travelDots"></g>
         </svg>
