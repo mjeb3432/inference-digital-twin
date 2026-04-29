@@ -1623,6 +1623,193 @@ select option {
 }
 
 /* ──────────────────────────────────────────────────────────────────
+ * 3D data centre view — Three.js orbit-camera scene.
+ * Hosts the WebGL canvas inside the canvas-shell so the toolbar
+ * and phase brief overlays still float above it.
+ * ────────────────────────────────────────────────────────────────── */
+.floor-cad-3d {
+  /* Don't override position — `.canvas-shell` already declares
+   * `position: absolute; inset: 0` to fill the construction canvas,
+   * and overriding it back to relative collapses the shell to 0
+   * height (no SVG inside to give it intrinsic size). */
+  background: linear-gradient(180deg, #05070b 0%, #050709 100%);
+}
+
+.forge-3d-host {
+  position: absolute;
+  inset: 0;
+  display: block;
+  background: #04060a;
+  cursor: grab;
+}
+.forge-3d-host:active { cursor: grabbing; }
+
+.forge-3d-canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.forge-3d-loading,
+.forge-3d-error {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-family: var(--font-mono, "JetBrains Mono", monospace);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  color: var(--accent, #33fbd3);
+  padding: 10px 14px;
+  border: 1px solid rgba(51, 251, 211, 0.4);
+  background: rgba(5, 7, 11, 0.85);
+  pointer-events: none;
+}
+
+.forge-3d-error {
+  color: #ffb1b1;
+  border-color: rgba(255, 107, 107, 0.5);
+}
+
+.forge-3d-hint {
+  position: absolute;
+  left: 18px;
+  bottom: 14px;
+  font-family: var(--font-mono, "JetBrains Mono", monospace);
+  font-size: 9.5px;
+  letter-spacing: 0.22em;
+  color: var(--dim, #a0a4ab);
+  background: rgba(5, 7, 11, 0.6);
+  padding: 5px 10px;
+  border-left: 2px solid var(--accent, #33fbd3);
+  pointer-events: none;
+}
+
+/* ──────────────────────────────────────────────────────────────────
+ * 3D zone labels — HTML overlay positioned per-frame from world
+ * coordinates. Color-coded by infrastructure kind: COMPUTE (mint),
+ * ENERGY (amber), COOLING (blue), NETWORK (sky), ELECTRICAL (orange).
+ * ────────────────────────────────────────────────────────────────── */
+.forge-3d-label-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 5;
+}
+
+.forge-3d-label {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform: translate(0, 0);
+  /* The card is anchored to the bottom-left of the label point so the
+   * pin sits on the equipment and the card hangs above it. */
+  transform-origin: 0 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  pointer-events: none;
+  font-family: var(--font-mono, "JetBrains Mono", monospace);
+  /* nudge up so the card sits above the pin */
+  margin: -36px 0 0 -1px;
+  transition: opacity 0.2s ease;
+}
+
+.forge-3d-label-pin {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent, #33fbd3);
+  box-shadow: 0 0 8px rgba(51, 251, 211, 0.7), 0 0 0 2px rgba(5, 7, 11, 0.85);
+  margin-top: 4px;
+}
+
+.forge-3d-label-card {
+  margin-bottom: 6px;
+  padding: 5px 9px;
+  background: rgba(5, 7, 11, 0.92);
+  border: 1px solid rgba(51, 251, 211, 0.55);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.55), 0 0 6px rgba(51, 251, 211, 0.18);
+  white-space: nowrap;
+}
+
+.forge-3d-label-title {
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  color: var(--accent, #33fbd3);
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.forge-3d-label-sub {
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--dim, #a0a4ab);
+  text-transform: uppercase;
+  margin-top: 2px;
+}
+
+/* Per-kind tint */
+.forge-3d-label-compute   .forge-3d-label-pin { background: #33fbd3; box-shadow: 0 0 10px rgba(51, 251, 211, 0.85), 0 0 0 2px rgba(5, 7, 11, 0.85); }
+.forge-3d-label-compute   .forge-3d-label-card { border-color: rgba(51, 251, 211, 0.65); }
+.forge-3d-label-compute   .forge-3d-label-title { color: #33fbd3; }
+
+.forge-3d-label-cooling   .forge-3d-label-pin { background: #6dd6ff; box-shadow: 0 0 10px rgba(109, 214, 255, 0.85), 0 0 0 2px rgba(5, 7, 11, 0.85); }
+.forge-3d-label-cooling   .forge-3d-label-card { border-color: rgba(109, 214, 255, 0.65); }
+.forge-3d-label-cooling   .forge-3d-label-title { color: #6dd6ff; }
+
+.forge-3d-label-network   .forge-3d-label-pin { background: #b6d6ff; box-shadow: 0 0 10px rgba(182, 214, 255, 0.85), 0 0 0 2px rgba(5, 7, 11, 0.85); }
+.forge-3d-label-network   .forge-3d-label-card { border-color: rgba(182, 214, 255, 0.6); }
+.forge-3d-label-network   .forge-3d-label-title { color: #b6d6ff; }
+
+.forge-3d-label-energy    .forge-3d-label-pin { background: #ffd166; box-shadow: 0 0 10px rgba(255, 209, 102, 0.85), 0 0 0 2px rgba(5, 7, 11, 0.85); }
+.forge-3d-label-energy    .forge-3d-label-card { border-color: rgba(255, 209, 102, 0.6); }
+.forge-3d-label-energy    .forge-3d-label-title { color: #ffd166; }
+
+.forge-3d-label-electrical .forge-3d-label-pin { background: #ff9a4d; box-shadow: 0 0 10px rgba(255, 154, 77, 0.85), 0 0 0 2px rgba(5, 7, 11, 0.85); }
+.forge-3d-label-electrical .forge-3d-label-card { border-color: rgba(255, 154, 77, 0.55); }
+.forge-3d-label-electrical .forge-3d-label-title { color: #ff9a4d; }
+
+/* Legend — small color-coded chip strip in the corner of the 3D
+ * canvas so the user knows what each label colour means. */
+.forge-3d-legend {
+  position: absolute;
+  right: 16px;
+  bottom: 14px;
+  display: flex;
+  gap: 12px;
+  padding: 6px 10px;
+  background: rgba(5, 7, 11, 0.7);
+  border-left: 2px solid rgba(51, 251, 211, 0.5);
+  font-family: var(--font-mono, "JetBrains Mono", monospace);
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  color: var(--dim, #a0a4ab);
+  pointer-events: none;
+}
+.forge-3d-legend-item { display: flex; align-items: center; gap: 5px; }
+.forge-3d-legend-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  box-shadow: 0 0 6px currentColor;
+}
+.forge-3d-legend-compute  .forge-3d-legend-dot { background: #33fbd3; color: #33fbd3; }
+.forge-3d-legend-energy   .forge-3d-legend-dot { background: #ffd166; color: #ffd166; }
+.forge-3d-legend-cooling  .forge-3d-legend-dot { background: #6dd6ff; color: #6dd6ff; }
+.forge-3d-legend-network  .forge-3d-legend-dot { background: #b6d6ff; color: #b6d6ff; }
+
+.floor-btn[disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.floor-btn.active {
+  background: rgba(51, 251, 211, 0.15);
+  border-color: var(--accent, #33fbd3);
+  color: var(--accent, #33fbd3);
+}
+
+/* ──────────────────────────────────────────────────────────────────
  * Searchable city combobox — replaces the native <select>.
  *
  * Why custom: the native select is hard to scan against a dark

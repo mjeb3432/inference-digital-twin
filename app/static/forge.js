@@ -511,6 +511,11 @@
     /* City combobox UI state — survives recalcAll/renderAll cycles
      * so the panel doesn't snap shut while the user types. */
     cityCombo: { open: false, search: "", focusIndex: 0 },
+    /* Three.js renderer handle when the 3D dimension mode is active.
+     * Persisted on the ui object so the (singleton) WebGL context can
+     * be torn down cleanly when the user toggles back to 2D or
+     * navigates away from the floor view. */
+    forge3d: null,
     mapTicker: null,
     lastValidationSig: "",
     pendingCanvasTransition: false,
@@ -529,6 +534,14 @@
       dragStartY: 0,
       layerPanelOpen: false,
       scalePreset: "fit",
+      /* "3d" (default) renders an orbit-camera Three.js scene of the
+       * full ground floor — building shell, data hall, mechanical,
+       * electrical, MMR, plus the outdoor power yard. "2d" toggles
+       * back to the legacy SVG CAD plan for users who prefer the
+       * blueprint view. The toggle is preserved across renders so
+       * flipping back to 2D and re-flipping to 3D doesn't reload
+       * Three.js (only the scene + DOM are rebuilt). */
+      dimensionMode: "3d",
       layers: {
         site: true,
         building: true,
@@ -612,17 +625,23 @@
   }
 
   function scheduleInitialHydration() {
+    let hydrated = false;
     const hydrate = () => {
+      if (hydrated) return;
+      hydrated = true;
       renderCenterCanvas();
       loadWorldPaths();
     };
 
     if (typeof window.requestAnimationFrame === "function") {
       window.requestAnimationFrame(hydrate);
-      return;
     }
 
-    window.setTimeout(hydrate, 0);
+    /* Belt-and-braces setTimeout fallback: when the tab is hidden
+     * Chrome throttles rAF heavily and the boot shell never goes
+     * away. The setTimeout still fires (~1Hz minimum even for hidden
+     * tabs) so we get a real first paint regardless of visibility. */
+    window.setTimeout(hydrate, 80);
   }
 
   async function loadWorldPaths() {
@@ -1495,6 +1514,16 @@
       renderCenterCanvas();
       return;
     }
+    if (action === "dim-mode") {
+      const want = actionNode.dataset.dim === "3d" ? "3d" : "2d";
+      if (ui.canvas.dimensionMode === want) return;
+      ui.canvas.dimensionMode = want;
+      /* Always tear down any existing 3D scene before re-rendering
+       * so the WebGL context isn't leaked. */
+      teardownForge3D();
+      renderCenterCanvas();
+      return;
+    }
     if (action === "fullscreen") {
       onToggleImmersive();
       return;
@@ -1525,6 +1554,9 @@
 
   function onCanvasWheel(event) {
     if (ui.mode !== VIEW_MODE.FLOOR) return;
+    /* In 3D mode let OrbitControls own the wheel so the camera can
+     * dolly without the SVG zoom fighting it. */
+    if (ui.canvas.dimensionMode === "3d") return;
     const viewport = event.target.closest(".floor-svg-viewport");
     if (!viewport) return;
     event.preventDefault();
@@ -1536,6 +1568,9 @@
 
   function onCanvasPointerDown(event) {
     if (ui.mode !== VIEW_MODE.FLOOR) return;
+    /* 3D mode: OrbitControls handles all pointer events on its own
+     * canvas — don't enable SVG-pan in parallel. */
+    if (ui.canvas.dimensionMode === "3d") return;
     if (event.button !== 0) return;
     if (event.target.closest(".floor-toolbar")) return;
     if (!event.target.closest(".floor-svg-viewport")) return;
@@ -2552,6 +2587,10 @@
 
   function clearPersistedFacilityState() {
     try { window.localStorage.removeItem(FULL_STATE_KEY); } catch (_) {}
+    /* When the user explicitly resets the build, also clear the "I have
+     * already entered the hall" flag so the WebGL2 datacenter scan
+     * intro plays again — this is a fresh start, not a return visit. */
+    try { window.localStorage.removeItem("forge:intro:seen:v1"); } catch (_) {}
   }
 
   /* ============================================================
@@ -3459,11 +3498,87 @@
 
     if (mapMode) {
       el.constructionCanvas.innerHTML = renderMapView(animate);
+      teardownForge3D();
     } else {
       el.constructionCanvas.innerHTML = renderFloorView(animate);
     }
 
+    /* Mount or unmount the 3D scene depending on the current view+mode.
+     * The string-based renderFloorView leaves a #forge3dHost element
+     * behind when 3D is active; we attach Three.js to it here. */
+    if (!mapMode && ui.canvas.dimensionMode === "3d") {
+      ensureForge3DMount();
+    } else {
+      teardownForge3D();
+    }
+
     setupTravelAnimations(mapMode ? VIEW_MODE.MAP : VIEW_MODE.FLOOR);
+  }
+
+  /**
+   * Mount the Three.js 3D data center into #forge3dHost. Idempotent —
+   * a second call after a rerender disposes the old scene first so we
+   * don't leak GL contexts. The actual library load is async and we
+   * tolerate that by leaving the loading hint visible until ready. */
+  function ensureForge3DMount() {
+    /* Always start clean — between renders the host element is replaced
+     * (renderFloorView returns a fresh innerHTML each time), so any
+     * prior scene's renderer.domElement is already gone from the DOM
+     * but we still want to dispose its WebGL context. */
+    teardownForge3D();
+
+    const host = document.getElementById("forge3dHost");
+    if (!host) return;
+    if (typeof window.Forge3D !== "object") {
+      console.warn("[forge3d] window.Forge3D missing — script not loaded?");
+      return;
+    }
+
+    const phase = facilityState.phase;
+    const { plan, racks, networkRows } = deriveFloorLayout(phase);
+
+    /* Mark the host as pending so we don't double-mount on a quick
+     * re-render. */
+    if (host.dataset.mounting === "1") return;
+    host.dataset.mounting = "1";
+
+    window.Forge3D.mountForge3DInto({
+      container: host,
+      plan,
+      racks,
+      networkRows,
+      phase,
+      /* Pass the user's actual decisions so the 3D scene can adapt
+       * its outdoor power yard + cooling plant + rack styling. */
+      powerMix: { ...facilityState.power.sources },
+      coolingType: facilityState.facility.coolingType || "air",
+      targetMw: ui.derived.targetMw || facilityState.power.targetMW || 10,
+      locationType: facilityState.site.locationType || "rural",
+      gpuModel: facilityState.compute.gpuModel || "h100",
+    }).then((handle) => {
+      ui.forge3d = handle;
+      const loading = document.getElementById("forge3dLoading");
+      if (loading) loading.remove();
+      host.dataset.mounting = "";
+    }).catch((err) => {
+      console.error("[forge3d] mount failed:", err);
+      host.dataset.mounting = "";
+      const loading = document.getElementById("forge3dLoading");
+      if (loading) {
+        loading.textContent = "3D RENDERER FAILED — FALLING BACK TO 2D";
+        loading.classList.add("forge-3d-error");
+      }
+      /* Fall back to 2D so the user isn't stranded on a blank scene. */
+      ui.canvas.dimensionMode = "2d";
+      setTimeout(() => renderCenterCanvas(), 1200);
+    });
+  }
+
+  function teardownForge3D() {
+    if (ui.forge3d && typeof ui.forge3d.dispose === "function") {
+      try { ui.forge3d.dispose(); } catch (_) {}
+    }
+    ui.forge3d = null;
   }
 
   function deriveFloorLayout(phase) {
@@ -3510,6 +3625,30 @@
     const { plan, racks, networkRows } = deriveFloorLayout(phase);
     const zoom = ui.canvas.zoom;
     const stageClass = withTransition ? "floor-stage" : "";
+    const is3d = ui.canvas.dimensionMode === "3d";
+
+    if (is3d) {
+      /* The 3D scene is mounted imperatively after this string is
+       * inserted into the DOM (see renderCenterCanvas → ensureForge3DMount).
+       * We just emit a host container with a loading hint. */
+      return `
+        <div class="canvas-shell floor-cad floor-cad-3d ${stageClass}">
+          ${renderFloorToolbar()}
+          ${renderPhaseBriefOverlay()}
+          ${renderTutorialRestoreChip()}
+          <div id="forge3dHost" class="forge-3d-host" role="img" aria-label="3D facility view">
+            <div class="forge-3d-loading" id="forge3dLoading">LOADING 3D RENDERER…</div>
+          </div>
+          <div class="forge-3d-hint">DRAG TO ORBIT · SCROLL TO ZOOM · CLICK 2D TO SEE BLUEPRINT</div>
+          <div class="forge-3d-legend" aria-hidden="true">
+            <div class="forge-3d-legend-item forge-3d-legend-compute"><span class="forge-3d-legend-dot"></span>COMPUTE</div>
+            <div class="forge-3d-legend-item forge-3d-legend-energy"><span class="forge-3d-legend-dot"></span>ENERGY</div>
+            <div class="forge-3d-legend-item forge-3d-legend-cooling"><span class="forge-3d-legend-dot"></span>COOLING</div>
+            <div class="forge-3d-legend-item forge-3d-legend-network"><span class="forge-3d-legend-dot"></span>NETWORK</div>
+          </div>
+        </div>
+      `;
+    }
 
     return `
       <div class="canvas-shell floor-cad ${stageClass}">
@@ -3862,6 +4001,13 @@
 
   function renderFloorToolbar() {
     const scalePreset = Object.prototype.hasOwnProperty.call(SCALE_PRESETS, ui.canvas.scalePreset) ? ui.canvas.scalePreset : "fit";
+    const is3d = ui.canvas.dimensionMode === "3d";
+    /* 3D is now available at every phase. Earlier phases just show a
+     * partially-populated facility (e.g. no racks at Phase 1, no
+     * gensets if the user hasn't chosen gas in Phase 2 yet). The
+     * outdoor power yard, building shell, and zone labels make the
+     * 3D model legible even before compute decisions land. */
+    const threeDAvailable = true;
     return `
       <div class="floor-toolbar">
         <div class="floor-toolbar-group">
@@ -3872,18 +4018,20 @@
           <button class="ghost-button floor-btn" type="button" data-canvas-action="preset-view" data-preset-key="network">NETWORK</button>
         </div>
         <div class="floor-toolbar-group">
-          <button class="ghost-button floor-btn floor-zoom" type="button" data-canvas-action="zoom-out">−</button>
-          <select class="floor-scale-select" data-canvas-action="scale-select">
+          <button class="ghost-button floor-btn floor-zoom" type="button" data-canvas-action="zoom-out" ${is3d ? "disabled" : ""}>−</button>
+          <select class="floor-scale-select" data-canvas-action="scale-select" ${is3d ? "disabled" : ""}>
             <option value="1:50" ${scalePreset === "1:50" ? "selected" : ""}>1:50</option>
             <option value="1:100" ${scalePreset === "1:100" ? "selected" : ""}>1:100</option>
             <option value="1:200" ${scalePreset === "1:200" ? "selected" : ""}>1:200</option>
             <option value="fit" ${scalePreset === "fit" ? "selected" : ""}>FIT</option>
           </select>
-          <button class="ghost-button floor-btn floor-zoom" type="button" data-canvas-action="zoom-in">+</button>
+          <button class="ghost-button floor-btn floor-zoom" type="button" data-canvas-action="zoom-in" ${is3d ? "disabled" : ""}>+</button>
         </div>
         <div class="floor-toolbar-group">
+          <button class="ghost-button floor-btn ${!is3d ? "active" : ""}" type="button" data-canvas-action="dim-mode" data-dim="2d">2D</button>
+          <button class="ghost-button floor-btn ${is3d ? "active" : ""}" type="button" data-canvas-action="dim-mode" data-dim="3d" ${threeDAvailable ? "" : "disabled title=\"Available from Phase 5+\""}>3D</button>
           <button class="ghost-button floor-btn" type="button" data-canvas-action="fullscreen">⤢ FULLSCREEN</button>
-          <button class="ghost-button floor-btn" type="button" data-canvas-action="export-drawing">↓ EXPORT SVG</button>
+          <button class="ghost-button floor-btn" type="button" data-canvas-action="export-drawing" ${is3d ? "disabled" : ""}>↓ EXPORT SVG</button>
         </div>
       </div>
     `;
