@@ -9,9 +9,12 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Comfortaa:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/static/global-nav.css?v=20260425b" />
-  <link rel="stylesheet" href="/static/control-room.css?v=20260427a" />
+  <link rel="stylesheet" href="/static/control-room.css?v=20260429i" />
+  <link rel="stylesheet" href="/static/forge.css?v=20260429i" />
   <!-- Cross-page Forge state bridge (must load before control-room.js) -->
   <script src="/static/forge-state.js?v=20260425c"></script>
+  <!-- 3D renderer — lazy-loads Three.js. -->
+  <script src="/static/forge-3d.js?v=20260429i" defer></script>
 </head>
 <body class="control-room-page" data-active-nav="control-room">
 
@@ -113,12 +116,16 @@
       </section>
     </aside>
 
-    <!-- CENTER: ISOMETRIC VIEW WITH ZOOM ──-->
-    <section class="control-center" aria-label="Isometric facility view">
+    <!-- CENTER: 3D VIEW + LEGACY ISOMETRIC ──-->
+    <section class="control-center" aria-label="Facility 3D view">
       <header class="center-header">
         <p class="kicker">CONTROL ROOM</p>
-        <h2>INFERENCE FABRIC ISOMETRIC VIEW</h2>
-        <div class="zoom-ladder">
+        <h2>INFERENCE FABRIC — LIVE 3D VIEW</h2>
+        <div class="control-view-toggle" role="tablist" aria-label="View mode">
+          <button class="ghost-button view-btn active" type="button" role="tab" aria-selected="true" data-view="3d">3D LIVE</button>
+          <button class="ghost-button view-btn" type="button" role="tab" aria-selected="false" data-view="iso">ISOMETRIC</button>
+        </div>
+        <div class="zoom-ladder" id="zoomLadder">
           <span class="zoom-step active" data-lod="0">FLOOR</span>
           <span class="zoom-sep">·</span>
           <span class="zoom-step" data-lod="1">RACK</span>
@@ -131,13 +138,15 @@
         </div>
       </header>
 
-      <div id="isoViewContainer" class="iso-view-container" aria-live="polite">
-        <svg id="isoView" class="iso-view" viewBox="0 0 800 600" xmlns="http://www.w3.org/2000/svg">
-          <!-- Isometric grid will be rendered here -->
-        </svg>
+      <div id="control3dHost" class="control-3d-host" role="img" aria-label="Live 3D data centre">
+        <div class="control-3d-loading">LOADING 3D RENDERER…</div>
       </div>
 
-      <div class="zoom-hint" id="zoomHint">Scroll to zoom • Click racks to inspect</div>
+      <div id="isoViewContainer" class="iso-view-container" aria-live="polite" hidden>
+        <svg id="isoView" class="iso-view" viewBox="0 0 800 600" xmlns="http://www.w3.org/2000/svg"></svg>
+      </div>
+
+      <div class="zoom-hint" id="zoomHint">DRAG TO ORBIT · SCROLL TO ZOOM · HOVER A PIN FOR DETAILS</div>
     </section>
 
     <!-- RIGHT RAIL: ASSET DETAIL ──────────-->
@@ -269,6 +278,6 @@
     </div>
   </div>
 
-  <script src="/static/control-room.js?v=20260427a" defer></script>
+  <script src="/static/control-room.js?v=20260429i" defer></script>
 </body>
 </html>

@@ -115,7 +115,10 @@ def test_floor_toolbar_exposes_svg_export_action() -> None:
     body = between(source, "function renderFloorToolbar()", "function renderLayerPanel()")
 
     assert "data-canvas-action=\"export-drawing\"" in body
-    assert "EXPORT SVG" in body
+    # The button's user-facing label can be either explicit text
+    # ("EXPORT SVG") or an icon with a tooltip — accept either form
+    # so we don't lock the toolbar layout into a particular density.
+    assert ("EXPORT SVG" in body) or ("Export SVG" in body)
 
 
 def test_gbps_to_gbps_conversion_is_explicit() -> None:

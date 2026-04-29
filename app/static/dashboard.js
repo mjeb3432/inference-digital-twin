@@ -497,9 +497,167 @@ function reclassifyAllRacks() {
   }
 }
 
+// ─── 3D Live view ──────────────────────────────────────────────────
+//
+// The Dashboard's center pane has two view modes:
+//   "cards"  — the existing rack-card grid with WHY badges
+//   "3d"     — the same Three.js facility model the Forge renders,
+//              mounted live so the user can orbit/inspect their
+//              actual build from the operations dashboard.
+//
+// We need the user's facility plan to mount the 3D scene. Since the
+// dashboard isn't part of the Forge IIFE, we re-run a tiny piece of
+// the floor-plan math here (matching what `computeFloorplan` returns
+// in the Forge) so the building outline + room layout match.
+let dashboard3dHandle = null;
+let currentDashboardView = "cards";
+
+function approximatePlanForDashboard(snapshot) {
+  /* Match the Forge's `computeFloorplan` for a default reasonable
+   * Phase-8 layout. The Dashboard always renders against a completed
+   * build (gated by isBuildComplete) so we use the snapshot's known
+   * mw + rack count for sizing. */
+  const acreage = 25;
+  const targetMw = Number(snapshot?.power?.targetMw) || 10;
+  const rackCount = (snapshot && window.ForgeState
+    ? window.ForgeState.deriveRackCount(snapshot)
+    : 20) || 20;
+  const coolingType = (snapshot?.facilityCons?.cooling || "air").toLowerCase();
+
+  const VIEW_W = 1800, VIEW_H = 1100;
+  const siteW = clamp(680 + acreage * 2.2, 680, 1520);
+  const siteH = clamp(siteW / 1.78, 390, 860);
+  const siteX = (VIEW_W - siteW) / 2;
+  const siteY = (VIEW_H - siteH) / 2 + 12;
+  const setback = 50;
+  const buildingW = clamp(siteW * 0.62, 260, siteW - setback * 2 - 16);
+  const buildingH = clamp(siteH * 0.62, 180, siteH - setback * 2 - 16);
+  const buildingX = siteX + (siteW - buildingW) / 2;
+  const buildingY = siteY + (siteH - buildingH) / 2;
+  const supportBand = clamp(buildingH * 0.23, 64, 138);
+  const mechWidth = buildingW * (["d2c", "immersion"].includes(coolingType) ? 0.2 : 0.28);
+  const electricalWidth = buildingW * 0.17;
+  const officeWidth = buildingW * 0.12;
+  const loadingWidth = buildingW * 0.14;
+  const roomY = buildingY + 6;
+  const roomH = supportBand - 12;
+  const rooms = {
+    mechanical:  { x: buildingX + 6, y: roomY, w: mechWidth - 10, h: roomH },
+    electrical:  { x: buildingX + mechWidth, y: roomY, w: electricalWidth - 8, h: roomH },
+    office:      { x: buildingX + mechWidth + electricalWidth, y: roomY, w: officeWidth - 6, h: roomH },
+    loading:     { x: buildingX + buildingW - loadingWidth - 6, y: roomY, w: loadingWidth, h: roomH },
+    mmr:         { x: buildingX + buildingW - loadingWidth - 74, y: roomY + 8, w: 62, h: 24 },
+    switchgear:  { x: buildingX - 44, y: buildingY + buildingH * 0.26, w: 36, h: 76 },
+    dataHall:    { x: buildingX + 8, y: buildingY + supportBand + 8, w: buildingW - 16, h: buildingH - supportBand - 14 },
+  };
+  return {
+    site: { x: siteX, y: siteY, w: siteW, h: siteH, acres: acreage, setback },
+    building: { x: buildingX, y: buildingY, w: buildingW, h: buildingH },
+    rooms,
+  };
+}
+
+function approximateRacksForDashboard(plan, rackCount, coolingType) {
+  const dh = plan.rooms.dataHall;
+  if (!dh || rackCount <= 0) {
+    return { slots: [], aisles: [], rowLabels: [], pdus: [], manifolds: [], trays: [], clusters: [], rowCount: 0, installed: 0, capacity: 0 };
+  }
+  const dense = ["d2c", "immersion"].includes(coolingType);
+  const capacity = Math.max(rackCount, Math.ceil(rackCount * 1.26));
+  const rowCount = clamp(Math.round(Math.sqrt(capacity / 10)), 2, 26);
+  const slotsPerRow = Math.max(8, Math.ceil(capacity / rowCount));
+  const innerX = dh.x + 10, innerY = dh.y + 12;
+  const innerW = dh.w - 20, innerH = dh.h - 20;
+  const rowPitch = innerH / rowCount;
+  const rackDepth = clamp(rowPitch * (dense ? 0.5 : 0.44), 5, 15);
+  const slotPitch = innerW / slotsPerRow;
+  const rackWidth = clamp(slotPitch * (dense ? 0.58 : 0.66), 4, 13);
+  const slots = [], aisles = [], rowLabels = [], clusters = [];
+  for (let row = 0; row < rowCount; row++) {
+    const y = innerY + row * rowPitch + (rowPitch - rackDepth) / 2;
+    aisles.push({
+      type: row % 2 === 0 ? "cold" : "hot",
+      id: `${row % 2 === 0 ? "CA" : "HA"}-${String(row + 1).padStart(2, "0")}`,
+      x: innerX, y: innerY + row * rowPitch, w: innerW, h: rowPitch,
+    });
+    rowLabels.push({ row, x: innerX + 2, y: y - 3, cy: y + rackDepth / 2, label: `ROW-${row}`, short: String(row) });
+    for (let col = 0; col < slotsPerRow; col++) {
+      slots.push({
+        x: innerX + col * slotPitch + (slotPitch - rackWidth) / 2,
+        y, w: rackWidth, h: rackDepth, row, col,
+      });
+    }
+  }
+  for (let i = 0; i < rowCount; i += 4) clusters.push({ start: i, end: Math.min(rowCount - 1, i + 3) });
+  return { slots, aisles, rowLabels, pdus: [], manifolds: [], trays: [], clusters, rowCount, installed: rackCount, capacity };
+}
+
+async function mountDashboard3D() {
+  if (!window.Forge3D) {
+    console.warn("[dashboard 3D] Forge3D not loaded yet");
+    return;
+  }
+  const host = document.getElementById("dashboard3dHost");
+  if (!host) return;
+  if (dashboard3dHandle) {
+    try { dashboard3dHandle.dispose(); } catch (_) {}
+    dashboard3dHandle = null;
+  }
+  const snap = currentSnapshot || loadSnapshot();
+  const coolingType = (snap?.facilityCons?.cooling || "air").toLowerCase();
+  const plan = approximatePlanForDashboard(snap);
+  const rackCount = window.ForgeState ? window.ForgeState.deriveRackCount(snap) : 32;
+  const racks = approximateRacksForDashboard(plan, rackCount, coolingType);
+
+  try {
+    dashboard3dHandle = await window.Forge3D.mountForge3DInto({
+      container: host,
+      plan, racks, phase: 8,
+      powerMix: { fom: 100, gas: 0, solar: 0, wind: 0, smr: 0 },
+      coolingType,
+      targetMw: Number(snap?.power?.targetMw) || 10,
+      locationType: "rural",
+      gpuModel: snap?.compute?.gpuModel || "h100",
+    });
+    const loading = host.querySelector(".dashboard-3d-loading");
+    if (loading) loading.remove();
+  } catch (e) {
+    console.error("[dashboard 3D] mount failed:", e);
+  }
+}
+
+function setDashboardView(view) {
+  if (view === currentDashboardView) return;
+  currentDashboardView = view;
+  const grid = document.getElementById("rackGrid");
+  const host = document.getElementById("dashboard3dHost");
+  if (!grid || !host) return;
+  if (view === "3d") {
+    grid.hidden = true;
+    host.hidden = false;
+    mountDashboard3D();
+  } else {
+    grid.hidden = false;
+    host.hidden = true;
+    if (dashboard3dHandle) {
+      try { dashboard3dHandle.dispose(); } catch (_) {}
+      dashboard3dHandle = null;
+    }
+  }
+  document.querySelectorAll(".view-btn").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.view === view);
+    btn.setAttribute("aria-selected", String(btn.dataset.view === view));
+  });
+}
+
 // ─── Event listeners ──────────────────────────────────────────────
 document.addEventListener("DOMContentLoaded", () => {
   initDashboard();
+
+  /* Wire the CARDS / 3D LIVE toggle */
+  document.querySelectorAll(".view-btn").forEach((btn) => {
+    btn.addEventListener("click", () => setDashboardView(btn.dataset.view));
+  });
 
   // Reflect saved threshold values into the inputs on load
   syncThresholdInputs();

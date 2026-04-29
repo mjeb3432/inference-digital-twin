@@ -9,9 +9,12 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Comfortaa:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/static/global-nav.css?v=20260425b" />
-  <link rel="stylesheet" href="/static/dashboard.css?v=20260427a" />
+  <link rel="stylesheet" href="/static/dashboard.css?v=20260429i" />
+  <link rel="stylesheet" href="/static/forge.css?v=20260429i" />
   <!-- Cross-page Forge state bridge (must load before dashboard.js) -->
   <script src="/static/forge-state.js?v=20260425c"></script>
+  <!-- 3D renderer (also used on /forge) — lazy-loads Three.js. -->
+  <script src="/static/forge-3d.js?v=20260429i" defer></script>
 </head>
 <body class="dashboard-page" data-active-nav="dashboard">
 
@@ -131,9 +134,16 @@
       <header class="center-header">
         <p class="kicker">RACK FLOOR VIEW</p>
         <h2>INFERENCE FABRIC — 4×5 RACK GRID</h2>
+        <div class="dashboard-view-toggle" role="tablist" aria-label="View mode">
+          <button class="ghost-button view-btn active" type="button" role="tab" aria-selected="true" data-view="cards">CARDS</button>
+          <button class="ghost-button view-btn" type="button" role="tab" aria-selected="false" data-view="3d">3D LIVE</button>
+        </div>
       </header>
 
-      <div id="rackGrid" class="rack-grid"></div>
+      <div id="rackGrid" class="rack-grid" data-view-active="cards"></div>
+      <div id="dashboard3dHost" class="dashboard-3d-host" hidden role="img" aria-label="3D live data centre">
+        <div class="dashboard-3d-loading">LOADING 3D RENDERER…</div>
+      </div>
     </section>
 
     <!-- RIGHT RAIL: ASSET DETAIL & CONTROLS -->
@@ -250,6 +260,6 @@
     </aside>
   </main>
 
-  <script src="/static/dashboard.js?v=20260427a" defer></script>
+  <script src="/static/dashboard.js?v=20260429i" defer></script>
 </body>
 </html>
