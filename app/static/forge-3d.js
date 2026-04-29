@@ -237,6 +237,60 @@
     rim.position.set(0, CEILING_Y - 1, 0);
     scene.add(rim);
 
+    /* ---------- Sun + clouds (atmospheric polish) ---------- */
+    /* The sun is a glowing sphere that follows the key-light direction
+     * — when the user orbits, the sun stays anchored to the sky.
+     * Also adds a subtle lens flare disk that sits around the sphere
+     * for an "afternoon" feel without going full bloom-shader. */
+    const sun = new THREE.Mesh(
+      new THREE.SphereGeometry(8, 24, 16),
+      new THREE.MeshBasicMaterial({ color: 0xfff2cc, transparent: true, opacity: 0.95 })
+    );
+    /* Position the sun moderately off to the upper-right so it's
+     * visible at the default isometric camera angle without the
+     * user having to orbit up. */
+    sun.position.set(120, 78, 80);
+    scene.add(sun);
+
+    const sunHalo = new THREE.Mesh(
+      new THREE.SphereGeometry(14, 24, 16),
+      new THREE.MeshBasicMaterial({ color: 0xffd166, transparent: true, opacity: 0.18, side: THREE.BackSide })
+    );
+    sunHalo.position.copy(sun.position);
+    scene.add(sunHalo);
+
+    /* Drifting clouds — flat soft-edged sphere "puffs" placed up high
+     * in the sky. They translate slowly across the X-axis in the
+     * render loop so the sky feels alive. */
+    const cloudGroup = new THREE.Group();
+    const cloudMat = new THREE.MeshBasicMaterial({
+      color: 0xc8d4e0, transparent: true, opacity: 0.55,
+    });
+    for (let c = 0; c < 8; c++) {
+      const cloud = new THREE.Group();
+      /* Each cloud is a cluster of 3-5 spheres of varied size for a
+       * lumpy, non-perfect silhouette. */
+      const puffs = 3 + (c % 3);
+      for (let p = 0; p < puffs; p++) {
+        const r = 3.5 + (p * 0.7) % 2.5;
+        const puff = new THREE.Mesh(new THREE.SphereGeometry(r, 12, 10), cloudMat);
+        puff.position.set((p - puffs / 2) * 3.5, (p % 2 === 0 ? 0 : 0.6), (p * 0.5) % 1.4);
+        cloud.add(puff);
+      }
+      /* Clouds at y ≈ 38–55 — visible from the default isometric
+       * camera angle (eye y=42 looking at target y=1) without needing
+       * the user to orbit up. */
+      cloud.position.set(
+        (c * 60 - 200) % 320,
+        38 + ((c * 7) % 18),
+        -160 + (c * 33) % 320
+      );
+      cloud.userData.driftSpeed = 0.7 + (c % 3) * 0.3;
+      cloudGroup.add(cloud);
+    }
+    cloudGroup.userData.kind = "cloud-group";
+    scene.add(cloudGroup);
+
     /* Skybox-like sphere — gives a subtle horizon gradient instead
      * of a flat black background. Inside-out box with a vertical
      * gradient material. */
@@ -1569,17 +1623,32 @@
       const hub = new THREE.Mesh(new THREE.SphereGeometry(0.35, 12, 12), towerMat);
       hub.position.set(wx, turbineH, wz);
       worldGroup.add(hub);
-      /* Three blades, 120° apart so it reads as a real turbine */
+      /* Three blades, 120° apart, attached to a rotor Group so we can
+       * spin all three together via a single rotation in the render
+       * loop. The Group sits in front of the hub (slight Z offset) so
+       * blades appear to clear the tower. */
+      const turbineRotor = new THREE.Group();
+      turbineRotor.position.set(wx, turbineH, wz + 0.4);
+      turbineRotor.userData.kind = "wind-rotor";
       for (let b = 0; b < 3; b++) {
-        const blade = new THREE.Mesh(
-          new THREE.BoxGeometry(0.08, turbineH * 0.5, 0.5),
-          towerMat
-        );
-        blade.position.set(wx, turbineH + turbineH * 0.18, wz);
+        const bladeShape = new THREE.Shape();
+        /* Tapered blade — wider at the root, narrower at the tip,
+         * matches a real wind turbine silhouette far better than a
+         * uniform box. */
+        const bladeLen = turbineH * 0.55;
+        bladeShape.moveTo(-0.08, 0);
+        bladeShape.lineTo(0.08, 0);
+        bladeShape.lineTo(0.04, bladeLen);
+        bladeShape.lineTo(-0.04, bladeLen);
+        bladeShape.lineTo(-0.08, 0);
+        const bladeGeo = new THREE.ExtrudeGeometry(bladeShape, { depth: 0.12, bevelEnabled: false });
+        bladeGeo.translate(0, 0, -0.06);
+        const blade = new THREE.Mesh(bladeGeo, towerMat);
         blade.rotation.z = (b * 2 * Math.PI) / 3;
-        blade.userData.kind = "wind-blade";
-        worldGroup.add(blade);
+        blade.castShadow = true;
+        turbineRotor.add(blade);
       }
+      worldGroup.add(turbineRotor);
       /* PPA uplink line from the substation to the turbine, suggesting
        * a utility-grid tie-in even though the turbine sits far away. */
       if (plan.rooms.switchgear) {
@@ -1796,15 +1865,17 @@
     let running = true;
     let t0 = performance.now();
     const tmpVec = new THREE.Vector3();
-    /* Cache the DCIM scan plane + radial scan ring once (if they
-     * exist) so the per-frame loop doesn't traverse the scene each
-     * frame. The ring drives the periodic radar-style sweep. */
+    /* Cache the DCIM scan plane + radial scan ring + wind rotor +
+     * cloud group once (if they exist) so the per-frame loop doesn't
+     * traverse the scene each frame. */
     let scanPlane = null;
     let scanRing = null;
+    let windRotor = null;
     worldGroup.traverse((obj) => {
       if (!obj.userData) return;
       if (obj.userData.kind === "dcim-scan") scanPlane = obj;
       else if (obj.userData.kind === "dcim-scan-ring") scanRing = obj;
+      else if (obj.userData.kind === "wind-rotor") windRotor = obj;
     });
     /* Constants for the radial scan: full sweep every SCAN_PERIOD
      * seconds; the ring expands from r=0.6 to r=maxRadius and fades
@@ -1834,6 +1905,29 @@
         scanRing.scale.setScalar(r / 0.6);
         scanRing.material.opacity = 0.85 * (1 - phaseT);
       }
+
+      /* Spinning wind turbine — 0.6 rad/s ≈ 1 revolution per ~10s,
+       * matching the cinematic "slow majestic spin" wind farms get
+       * filmed at. */
+      if (windRotor) {
+        windRotor.rotation.z = dt * 0.6;
+      }
+
+      /* Drifting clouds — translate each cloud cluster along +X at
+       * its own speed; wrap around when it leaves the world's right
+       * edge so the sky never empties out. */
+      if (cloudGroup) {
+        cloudGroup.children.forEach((cloud) => {
+          cloud.position.x += (cloud.userData.driftSpeed || 1) * 0.012;
+          if (cloud.position.x > 220) cloud.position.x = -220;
+        });
+      }
+
+      /* Sun + halo subtle bobbing so the sky has barely-perceptible
+       * motion (like late-afternoon haze shimmer). */
+      sun.position.y = 78 + Math.sin(dt * 0.15) * 1.5;
+      sunHalo.position.copy(sun.position);
+      sunHalo.material.opacity = 0.16 + Math.sin(dt * 0.3) * 0.04;
       controls.update();
       renderer.render(scene, camera);
 
