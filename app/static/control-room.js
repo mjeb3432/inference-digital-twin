@@ -858,7 +858,136 @@ function applyForgeOverlay() {
   }
 }
 
-// ─── Scroll-Zoom Handler ──────────────────────────────────────────────
+// ─── 3D Live View ────────────────────────────────────────────────────
+//
+// Control Room defaults to a Three.js 3D view of the user's facility
+// (same renderer as /forge), with the legacy isometric SVG available
+// behind a toggle. Operators get to orbit their own data centre and
+// hover any zone for live status.
+let cr3dHandle = null;
+let crCurrentView = "3d";
+
+function approxPlanForCR(snap) {
+  const acreage = 25;
+  const rackCount = (snap && window.ForgeState ? window.ForgeState.deriveRackCount(snap) : 32) || 32;
+  const coolingType = (snap?.facilityCons?.cooling || "air").toLowerCase();
+  const VIEW_W = 1800, VIEW_H = 1100;
+  const siteW = 680 + acreage * 2.2;
+  const siteH = siteW / 1.78;
+  const siteX = (VIEW_W - siteW) / 2;
+  const siteY = (VIEW_H - siteH) / 2 + 12;
+  const buildingW = siteW * 0.62;
+  const buildingH = siteH * 0.62;
+  const buildingX = siteX + (siteW - buildingW) / 2;
+  const buildingY = siteY + (siteH - buildingH) / 2;
+  const supportBand = Math.max(64, buildingH * 0.23);
+  const mechWidth = buildingW * (["d2c", "immersion"].includes(coolingType) ? 0.2 : 0.28);
+  const electricalWidth = buildingW * 0.17;
+  const officeWidth = buildingW * 0.12;
+  const loadingWidth = buildingW * 0.14;
+  const roomY = buildingY + 6;
+  const roomH = supportBand - 12;
+  return {
+    site: { x: siteX, y: siteY, w: siteW, h: siteH, acres: acreage, setback: 50 },
+    building: { x: buildingX, y: buildingY, w: buildingW, h: buildingH },
+    rooms: {
+      mechanical:  { x: buildingX + 6, y: roomY, w: mechWidth - 10, h: roomH },
+      electrical:  { x: buildingX + mechWidth, y: roomY, w: electricalWidth - 8, h: roomH },
+      office:      { x: buildingX + mechWidth + electricalWidth, y: roomY, w: officeWidth - 6, h: roomH },
+      loading:     { x: buildingX + buildingW - loadingWidth - 6, y: roomY, w: loadingWidth, h: roomH },
+      mmr:         { x: buildingX + buildingW - loadingWidth - 74, y: roomY + 8, w: 62, h: 24 },
+      switchgear:  { x: buildingX - 44, y: buildingY + buildingH * 0.26, w: 36, h: 76 },
+      dataHall:    { x: buildingX + 8, y: buildingY + supportBand + 8, w: buildingW - 16, h: buildingH - supportBand - 14 },
+    },
+  };
+}
+
+function approxRacksForCR(plan, rackCount, coolingType) {
+  const dh = plan.rooms.dataHall;
+  if (!dh || rackCount <= 0) {
+    return { slots: [], aisles: [], rowLabels: [], pdus: [], manifolds: [], trays: [], clusters: [], rowCount: 0, installed: 0, capacity: 0 };
+  }
+  const dense = ["d2c", "immersion"].includes(coolingType);
+  const capacity = Math.max(rackCount, Math.ceil(rackCount * 1.26));
+  const rowCount = Math.max(2, Math.min(26, Math.round(Math.sqrt(capacity / 10))));
+  const slotsPerRow = Math.max(8, Math.ceil(capacity / rowCount));
+  const innerX = dh.x + 10, innerY = dh.y + 12;
+  const innerW = dh.w - 20, innerH = dh.h - 20;
+  const rowPitch = innerH / rowCount;
+  const rackDepth = Math.max(5, Math.min(15, rowPitch * (dense ? 0.5 : 0.44)));
+  const slotPitch = innerW / slotsPerRow;
+  const rackWidth = Math.max(4, Math.min(13, slotPitch * (dense ? 0.58 : 0.66)));
+  const slots = [], aisles = [], rowLabels = [], clusters = [];
+  for (let row = 0; row < rowCount; row++) {
+    const y = innerY + row * rowPitch + (rowPitch - rackDepth) / 2;
+    aisles.push({
+      type: row % 2 === 0 ? "cold" : "hot",
+      id: `${row % 2 === 0 ? "CA" : "HA"}-${String(row + 1).padStart(2, "0")}`,
+      x: innerX, y: innerY + row * rowPitch, w: innerW, h: rowPitch,
+    });
+    rowLabels.push({ row, x: innerX + 2, y: y - 3, cy: y + rackDepth / 2, label: `ROW-${row}`, short: String(row) });
+    for (let col = 0; col < slotsPerRow; col++) {
+      slots.push({
+        x: innerX + col * slotPitch + (slotPitch - rackWidth) / 2,
+        y, w: rackWidth, h: rackDepth, row, col,
+      });
+    }
+  }
+  for (let i = 0; i < rowCount; i += 4) clusters.push({ start: i, end: Math.min(rowCount - 1, i + 3) });
+  return { slots, aisles, rowLabels, pdus: [], manifolds: [], trays: [], clusters, rowCount, installed: rackCount, capacity };
+}
+
+async function mountControl3D() {
+  if (!window.Forge3D) return;
+  const host = document.getElementById("control3dHost");
+  if (!host) return;
+  if (cr3dHandle) { try { cr3dHandle.dispose(); } catch (_) {} cr3dHandle = null; }
+  const snap = getSnapshot();
+  const coolingType = (snap?.facilityCons?.cooling || "air").toLowerCase();
+  const plan = approxPlanForCR(snap);
+  const rackCount = window.ForgeState ? window.ForgeState.deriveRackCount(snap) : 32;
+  const racks = approxRacksForCR(plan, rackCount, coolingType);
+  try {
+    cr3dHandle = await window.Forge3D.mountForge3DInto({
+      container: host,
+      plan, racks, phase: 8,
+      powerMix: { fom: 100, gas: 0, solar: 0, wind: 0, smr: 0 },
+      coolingType,
+      targetMw: Number(snap?.power?.targetMw) || 10,
+      locationType: "rural",
+      gpuModel: snap?.compute?.gpuModel || "h100",
+    });
+    const loading = host.querySelector(".control-3d-loading");
+    if (loading) loading.remove();
+  } catch (e) {
+    console.error("[control 3D] mount failed:", e);
+  }
+}
+
+function setControlView(view) {
+  if (view === crCurrentView) return;
+  crCurrentView = view;
+  const host3d = document.getElementById("control3dHost");
+  const isoCt = document.getElementById("isoViewContainer");
+  const ladder = document.getElementById("zoomLadder");
+  if (view === "3d") {
+    if (host3d) host3d.hidden = false;
+    if (isoCt) isoCt.hidden = true;
+    if (ladder) ladder.style.display = "none";
+    mountControl3D();
+  } else {
+    if (host3d) host3d.hidden = true;
+    if (isoCt) isoCt.hidden = false;
+    if (ladder) ladder.style.display = "";
+    if (cr3dHandle) { try { cr3dHandle.dispose(); } catch (_) {} cr3dHandle = null; }
+  }
+  document.querySelectorAll(".control-view-toggle .view-btn").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.view === view);
+    btn.setAttribute("aria-selected", String(btn.dataset.view === view));
+  });
+}
+
+// ─── Scroll-Zoom Handler ────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   /* Build-completion gate — Control Room only opens once the user has
      finished the 8-phase build in the Forge. */
@@ -868,6 +997,18 @@ document.addEventListener('DOMContentLoaded', () => {
     return;
   }
   if (window.ForgeState) window.ForgeState.applyNavGate();
+
+  /* 3D LIVE / ISOMETRIC toggle — wire first so the default view comes up
+   * with the right mode. */
+  document.querySelectorAll(".control-view-toggle .view-btn").forEach((btn) => {
+    btn.addEventListener("click", () => setControlView(btn.dataset.view));
+  });
+
+  /* Mount the 3D view by default; hide the legacy ladder until the
+   * user toggles to ISOMETRIC. */
+  const ladder = document.getElementById("zoomLadder");
+  if (ladder) ladder.style.display = "none";
+  mountControl3D();
 
   const container = document.getElementById('isoViewContainer');
 

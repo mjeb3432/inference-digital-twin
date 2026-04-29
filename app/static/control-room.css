@@ -791,3 +791,57 @@ h2, h3 {
 }
 
 .console-input::placeholder { color: #5C626B; }
+
+/* ──────────────────────────────────────────────────────────────────
+ * Control Room 3D LIVE view — same Three.js renderer as the Forge.
+ * ────────────────────────────────────────────────────────────────── */
+.control-view-toggle {
+  display: inline-flex;
+  margin-top: 8px;
+  border: 1px solid rgba(51, 251, 211, 0.32);
+  border-radius: 4px;
+  overflow: hidden;
+  background: rgba(8, 9, 11, 0.92);
+}
+.control-view-toggle .view-btn {
+  border: 0;
+  border-radius: 0;
+  padding: 5px 12px;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  color: #a0a4ab;
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.control-view-toggle .view-btn + .view-btn {
+  border-left: 1px solid rgba(51, 251, 211, 0.32);
+}
+.control-view-toggle .view-btn.active {
+  background: rgba(51, 251, 211, 0.18);
+  color: #33fbd3;
+}
+
+.control-3d-host {
+  position: relative;
+  width: 100%;
+  flex: 1 1 auto;
+  min-height: 540px;
+  background: #04060a;
+  border: 1px solid rgba(51, 251, 211, 0.18);
+  margin-top: 12px;
+  overflow: hidden;
+}
+
+.control-3d-loading {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  color: #33fbd3;
+  pointer-events: none;
+}

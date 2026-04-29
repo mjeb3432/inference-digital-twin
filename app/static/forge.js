@@ -942,17 +942,20 @@
           updateMapOverlayValues();
         }
         if (facilityState.phase >= 5 && (facilityState.phase < 8 || ui.mode === VIEW_MODE.FLOOR)) {
+          /* In 3D mode the per-rack telemetry pulse is driven by the
+           * Three.js render loop directly (the scan plane + LED
+           * pulse). The 2D-SVG patcher always fails when the 3D
+           * canvas is mounted (no `.cad-rack-meta` nodes exist), so
+           * we just skip — calling renderCenterCanvas() here would
+           * tear down + re-mount the entire 3D scene, snapping the
+           * user's orbit-camera back to the default angle. That was
+           * being reported as "click resets to the beginning image". */
+          if (ui.canvas.dimensionMode === "3d") {
+            if (inspectorNeedsTelemetryRefresh()) renderInspector();
+            return;
+          }
           const refreshed = updateFloorTelemetryOverlay();
-          /* If we couldn't patch in place we used to fall back to a
-           * full `renderCenterCanvas()` every 1.4s — which on Phase 6+
-           * meant rebuilding the entire SVG (rack grid + network
-           * paths + travel-dot animations) every tick. That was a major
-           * source of post-Phase-5 lag. Now we just skip — the next
-           * legitimate state change will rebuild it, and the LEDs/labels
-           * on the existing canvas continue to update via the patcher. */
           if (!refreshed && !ui.continuousRenderPending) {
-            /* One-shot full render only if there's no pending continuous
-             * render already (avoids double-renders during slider drag). */
             ui.telemetryRetryCount = (ui.telemetryRetryCount || 0) + 1;
             if (ui.telemetryRetryCount > 4) {
               ui.telemetryRetryCount = 0;
@@ -3528,6 +3531,19 @@
    * don't leak GL contexts. The actual library load is async and we
    * tolerate that by leaving the loading hint visible until ready. */
   function ensureForge3DMount() {
+    /* Capture the prior 3D camera + target before tearing it down so
+     * we can restore the user's orbit angle after the remount. This
+     * prevents legitimate re-renders (slider drags, phase confirms,
+     * tutorial toggles) from snapping the user back to the default
+     * camera every time. */
+    let savedCam = null;
+    if (ui.forge3d && ui.forge3d.camera && ui.forge3d.controls) {
+      savedCam = {
+        pos: ui.forge3d.camera.position.toArray(),
+        tgt: ui.forge3d.controls.target.toArray(),
+      };
+    }
+
     /* Always start clean — between renders the host element is replaced
      * (renderFloorView returns a fresh innerHTML each time), so any
      * prior scene's renderer.domElement is already gone from the DOM
@@ -3575,6 +3591,15 @@
       cityLabel: ui.derived.cityLabel || null,
     }).then((handle) => {
       ui.forge3d = handle;
+      /* Restore the user's orbit camera so re-renders don't snap them
+       * back to the default isometric angle. */
+      if (savedCam && handle.camera && handle.controls) {
+        try {
+          handle.camera.position.fromArray(savedCam.pos);
+          handle.controls.target.fromArray(savedCam.tgt);
+          handle.controls.update();
+        } catch (_) {}
+      }
       const loading = document.getElementById("forge3dLoading");
       if (loading) loading.remove();
       host.dataset.mounting = "";

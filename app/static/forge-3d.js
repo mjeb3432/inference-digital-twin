@@ -306,23 +306,75 @@
 
       /* Location-specific surroundings */
       if (locationType === "rural") {
-        /* Scatter a few simple cone "trees" around the perimeter */
-        const treeMat = new THREE.MeshStandardMaterial({ color: 0x2a4d33, roughness: 0.95 });
-        const trunkMat = new THREE.MeshStandardMaterial({ color: 0x3a2a18, roughness: 0.9 });
-        const treeCount = 18;
+        /* Realistic conifer trees — each tree is a stack of progressively
+         * smaller cones (suggests layered branches) with a thicker
+         * tapered trunk + base flare. Sizes vary per-tree so the
+         * perimeter doesn't read as a regular pattern. Two foliage
+         * tints alternate (deeper green vs lighter mint) for variety. */
+        const trunkMat = new THREE.MeshStandardMaterial({ color: 0x3d2615, roughness: 0.95, metalness: 0 });
+        const foliageMatA = new THREE.MeshStandardMaterial({ color: 0x1f4029, roughness: 0.9 });
+        const foliageMatB = new THREE.MeshStandardMaterial({ color: 0x2d5a3a, roughness: 0.9 });
+        const foliageMatC = new THREE.MeshStandardMaterial({ color: 0x365e3f, roughness: 0.9 });
+        const foliageMats = [foliageMatA, foliageMatB, foliageMatC];
+
+        const treeCount = 30;
         for (let i = 0; i < treeCount; i++) {
-          const ang = (i / treeCount) * Math.PI * 2;
-          const r = Math.max(sw(plan.site.w), sw(plan.site.h)) * 0.45;
+          /* Distribute trees in a wider organic ring with random
+           * jitter so the perimeter looks natural, not algorithmic. */
+          const ang = (i / treeCount) * Math.PI * 2 + (i * 0.137) % 1.0;
+          const baseR = Math.max(sw(plan.site.w), sw(plan.site.h)) * 0.42;
+          const r = baseR + ((i * 7) % 11) * 0.4;
           const tx = sx + Math.cos(ang) * r;
           const tz = sz + Math.sin(ang) * r;
-          const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.16, 1.0, 6), trunkMat);
-          trunk.position.set(tx, 0.5, tz);
+          /* Vary scale so we get small saplings and tall mature pines */
+          const scale = 0.65 + ((i * 0.31) % 0.85);
+          const foliageMat = foliageMats[i % foliageMats.length];
+
+          const treeGroup = new THREE.Group();
+          treeGroup.position.set(tx, 0, tz);
+          /* Random rotation so trees don't all face the same way */
+          treeGroup.rotation.y = (i * 0.917) % (Math.PI * 2);
+
+          /* Trunk: thicker base + tapered top */
+          const trunkH = 1.3 * scale;
+          const trunk = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.12 * scale, 0.18 * scale, trunkH, 8),
+            trunkMat
+          );
+          trunk.position.y = trunkH / 2;
           trunk.castShadow = true;
-          worldGroup.add(trunk);
-          const cone = new THREE.Mesh(new THREE.ConeGeometry(0.9, 2.4, 8), treeMat);
-          cone.position.set(tx, 2.0, tz);
-          cone.castShadow = true;
-          worldGroup.add(cone);
+          treeGroup.add(trunk);
+
+          /* Three layered cone tiers — base wider, top tighter */
+          const tiers = 3 + (i % 2); // 3 or 4 tiers
+          let coneY = trunkH;
+          for (let t = 0; t < tiers; t++) {
+            const tierT = t / tiers;
+            const radius = (1.0 - tierT * 0.55) * 0.95 * scale;
+            const height = (1.4 - tierT * 0.25) * scale;
+            const cone = new THREE.Mesh(
+              new THREE.ConeGeometry(radius, height, 8),
+              foliageMat
+            );
+            cone.position.y = coneY + height / 2 - 0.18 * scale;
+            cone.castShadow = true;
+            treeGroup.add(cone);
+            coneY += height * 0.55;
+          }
+          worldGroup.add(treeGroup);
+        }
+
+        /* Scatter a few rounded "bushes" near the building entrance
+         * so the plant-life feels designed, not just perimeter-only. */
+        const bushMat = new THREE.MeshStandardMaterial({ color: 0x2a4d33, roughness: 0.95 });
+        for (let i = 0; i < 6; i++) {
+          const bx = sx + ((i % 3) - 1) * 8 + (i * 1.7);
+          const bz = sz + sw(plan.site.h) * 0.32 + (i % 2 === 0 ? -1.4 : 1.4);
+          const bush = new THREE.Mesh(new THREE.SphereGeometry(0.65 + (i * 0.11) % 0.4, 8, 6), bushMat);
+          bush.position.set(bx, 0.4, bz);
+          bush.scale.set(1, 0.7, 1);
+          bush.castShadow = true;
+          worldGroup.add(bush);
         }
       } else if (locationType === "urban") {
         /* A grid of low neighbouring building blocks tilted around the
@@ -408,11 +460,16 @@
      * perimeter fencing. We compose the building from those pieces
      * here so the 3D scene reads as a real industrial facility. */
     if (showBuilding) {
+      /* Modern DC palettes — light metal cladding (Equinix / QTS /
+       * Digital Realty look) with location-specific accents.
+       * Repurposed industrial keeps the warm brick warmth, urban
+       * gets a darker glass curtain wall vibe, rural/campus get the
+       * crisp white panel system most modern hyperscalers use. */
       const wallPal = locationType === "repurpose"
-        ? { tint: 0x8a4a2a, panel: 0x6a3a20, accent: 0xc88860 }
+        ? { tint: 0x8a4a2a, panel: 0x6a3a20, accent: 0xc88860, ribbon: 0x18242a, logoBand: 0xc88860 }
         : locationType === "urban"
-        ? { tint: 0x4a5560, panel: 0x363f49, accent: 0x6dd6ff }
-        : { tint: 0x6f7a85, panel: 0x4a525c, accent: 0x33fbd3 };
+        ? { tint: 0x6a7380, panel: 0x4f5763, accent: 0x6dd6ff, ribbon: 0x111720, logoBand: 0x222831 }
+        : { tint: 0xd0d4d8, panel: 0xafb4ba, accent: 0x33fbd3, ribbon: 0x18242a, logoBand: 0xeef0f3 };
 
       /* Solid concrete panel walls (one Mesh per face so we can give
        * each face slightly different material to read seams + shadow
@@ -421,48 +478,99 @@
        * construction. */
       const W = sw(bldg.w);
       const D = sw(bldg.h);
-      /* Walls are transparent — the user wants to see EVERY piece of
-       * equipment inside (data hall racks, mechanical CRAH columns,
-       * electrical switchgear, MMR rack). We render the panels as
-       * mostly-clear glass with a faint tint so the user still
-       * perceives a building shell, plus the panel seam lines + steel
-       * pilasters carry the architectural detail. */
+      /* Walls = mostly-transparent glass curtain so internal equipment
+       * stays visible, plus solid horizontal "spandrel" bands at the
+       * top and bottom of each face (where modern DCs have structural
+       * concrete) that keep the building reading as a real building.
+       * The middle band is a near-clear ribbon-window strip. */
       const wallSolidMat = new THREE.MeshStandardMaterial({
-        color: wallPal.tint, roughness: 0.4, metalness: 0.15,
-        transparent: true, opacity: 0.10,
+        color: wallPal.tint, roughness: 0.35, metalness: 0.55,
+        transparent: true, opacity: 0.18,
         side: THREE.DoubleSide,
         depthWrite: false,
         emissive: fullyOnline ? 0x081218 : 0x000000,
         emissiveIntensity: fullyOnline ? 0.35 : 0,
       });
       const wallShadeMat = new THREE.MeshStandardMaterial({
-        color: wallPal.panel, roughness: 0.45, metalness: 0.1,
-        transparent: true, opacity: 0.13,
+        color: wallPal.panel, roughness: 0.4, metalness: 0.45,
+        transparent: true, opacity: 0.22,
         side: THREE.DoubleSide,
         depthWrite: false,
+      });
+      /* Solid spandrel band at the bottom (kicker plate) and top
+       * (parapet line), opaque metal cladding so the building has
+       * a strong horizontal silhouette. */
+      const spandrelMat = new THREE.MeshStandardMaterial({
+        color: wallPal.panel, roughness: 0.55, metalness: 0.4,
+      });
+      /* Ribbon window glass — dark teal with a hint of emissive so it
+       * reads as illuminated interior glow when the facility is on. */
+      const ribbonMat = new THREE.MeshStandardMaterial({
+        color: wallPal.ribbon, roughness: 0.15, metalness: 0.85,
+        transparent: true, opacity: 0.55,
+        emissive: fullyOnline ? 0x0a3a48 : 0x051218,
+        emissiveIntensity: fullyOnline ? 0.45 : 0.2,
+        side: THREE.DoubleSide,
       });
       const seamMat = new THREE.LineBasicMaterial({ color: 0x0a0e12, transparent: true, opacity: 0.7 });
 
       function placeWall(w, d, x, y, z, rotY, panelCount, mat) {
-        const g = new THREE.BoxGeometry(w, BUILDING_HEIGHT, d);
-        const m = new THREE.Mesh(g, mat);
-        m.position.set(x, y, z);
-        m.rotation.y = rotY;
-        m.castShadow = true;
-        m.receiveShadow = true;
-        worldGroup.add(m);
-        /* Vertical panel seams — short line segments dropped between
-         * each panel to read as the joint between tilt-up sections. */
+        /* Modern DC façade composition — three horizontal bands per
+         * face: bottom 25% solid metal kicker (spandrel), middle 50%
+         * darker glass ribbon window, top 25% solid metal cap.
+         * Each is a separate mesh so the user perceives a real
+         * curtain-wall system. */
+        const kickerH = BUILDING_HEIGHT * 0.22;
+        const ribbonH = BUILDING_HEIGHT * 0.42;
+        const capH = BUILDING_HEIGHT - kickerH - ribbonH;
+
+        /* Bottom kicker (solid metal) */
+        const kicker = new THREE.Mesh(new THREE.BoxGeometry(w, kickerH, d), spandrelMat);
+        kicker.position.set(x, y - BUILDING_HEIGHT / 2 + kickerH / 2, z);
+        kicker.rotation.y = rotY;
+        kicker.castShadow = true;
+        kicker.receiveShadow = true;
+        worldGroup.add(kicker);
+
+        /* Middle ribbon window — slightly inset so it reads as glass */
+        const ribbon = new THREE.Mesh(
+          new THREE.BoxGeometry(w * 0.985, ribbonH, d * 0.6),
+          ribbonMat
+        );
+        ribbon.position.set(x, y - BUILDING_HEIGHT / 2 + kickerH + ribbonH / 2, z);
+        ribbon.rotation.y = rotY;
+        worldGroup.add(ribbon);
+
+        /* Top cap (solid metal cladding) */
+        const cap = new THREE.Mesh(new THREE.BoxGeometry(w, capH, d), mat);
+        cap.position.set(x, y + BUILDING_HEIGHT / 2 - capH / 2, z);
+        cap.rotation.y = rotY;
+        cap.castShadow = true;
+        cap.receiveShadow = true;
+        worldGroup.add(cap);
+
+        /* Vertical panel seams — span the kicker + cap; gaps over the
+         * ribbon are intentional so the seams don't cross the glass. */
         for (let i = 1; i < panelCount; i++) {
           const t = i / panelCount;
-          const seamGeo = new THREE.BufferGeometry().setFromPoints([
+          /* Bottom seam (kicker only) */
+          const seamGeoBot = new THREE.BufferGeometry().setFromPoints([
             new THREE.Vector3(-w / 2 + t * w, -BUILDING_HEIGHT / 2 + 0.2, d / 2 + 0.01),
+            new THREE.Vector3(-w / 2 + t * w, -BUILDING_HEIGHT / 2 + kickerH, d / 2 + 0.01),
+          ]);
+          const seamBot = new THREE.Line(seamGeoBot, seamMat);
+          seamBot.position.set(x, y, z);
+          seamBot.rotation.y = rotY;
+          worldGroup.add(seamBot);
+          /* Top seam (cap only) */
+          const seamGeoTop = new THREE.BufferGeometry().setFromPoints([
+            new THREE.Vector3(-w / 2 + t * w, BUILDING_HEIGHT / 2 - capH, d / 2 + 0.01),
             new THREE.Vector3(-w / 2 + t * w, BUILDING_HEIGHT / 2 - 0.2, d / 2 + 0.01),
           ]);
-          const seam = new THREE.Line(seamGeo, seamMat);
-          seam.position.set(x, y, z);
-          seam.rotation.y = rotY;
-          worldGroup.add(seam);
+          const seamTop = new THREE.Line(seamGeoTop, seamMat);
+          seamTop.position.set(x, y, z);
+          seamTop.rotation.y = rotY;
+          worldGroup.add(seamTop);
         }
       }
 
@@ -527,6 +635,39 @@
       const wallEdges = new THREE.LineSegments(new THREE.EdgesGeometry(wallShellGeo), wallEdgeMat);
       wallEdges.position.y = BUILDING_HEIGHT / 2;
       worldGroup.add(wallEdges);
+
+      /* Subtle horizontal accent stripe at the top of the kicker
+       * (where modern hyperscalers often run an LED or paint line)
+       * and a small "facility identifier" logo plaque on the east
+       * wall above the personnel entrance. */
+      const accentMat = new THREE.MeshStandardMaterial({
+        color: wallPal.accent, roughness: 0.3, metalness: 0.7,
+        emissive: wallPal.accent, emissiveIntensity: fullyOnline ? 0.7 : 0.25,
+      });
+      const stripeH = 0.18;
+      const stripePerim = [
+        { w: W, d: 0.45, x: 0, z: D / 2 + 0.05 },
+        { w: W, d: 0.45, x: 0, z: -D / 2 - 0.05 },
+        { w: 0.45, d: D, x: W / 2 + 0.05, z: 0 },
+        { w: 0.45, d: D, x: -W / 2 - 0.05, z: 0 },
+      ];
+      stripePerim.forEach((s) => {
+        const stripe = new THREE.Mesh(
+          new THREE.BoxGeometry(s.w, stripeH, s.d),
+          accentMat
+        );
+        stripe.position.set(s.x, BUILDING_HEIGHT * 0.22 + stripeH / 2, s.z);
+        worldGroup.add(stripe);
+      });
+      /* Facility logo plaque — a small mint-glow rectangle on the
+       * east face above the entrance. Reads as a brand sign. */
+      const logoMat = new THREE.MeshStandardMaterial({
+        color: wallPal.logoBand, roughness: 0.45, metalness: 0.5,
+        emissive: wallPal.accent, emissiveIntensity: fullyOnline ? 0.4 : 0.18,
+      });
+      const logoPlate = new THREE.Mesh(new THREE.BoxGeometry(0.2, 1.2, 3.0), logoMat);
+      logoPlate.position.set(W / 2 + 0.08, BUILDING_HEIGHT * 0.78, D * 0.18);
+      worldGroup.add(logoPlate);
 
       /* Steel corner pilasters at the building corners — narrow tall
        * columns that read as structural steel. */
@@ -1227,7 +1368,12 @@
      * so we can keep the marker visible while the card is hidden. */
     const labelEls = labelTargets.map((tgt) => {
       const el = document.createElement("div");
-      el.className = `forge-3d-label forge-3d-label-${tgt.kind} forge-3d-label-hidden`;
+      /* Add the spawn-animation class for newly-mounted labels so they
+       * pop in instead of just appearing. The class auto-cleans via
+       * a setTimeout below since CSS animations don't auto-remove
+       * classes. */
+      el.className = `forge-3d-label forge-3d-label-${tgt.kind} forge-3d-label-spawn`;
+      setTimeout(() => el.classList.remove("forge-3d-label-spawn"), 700);
       el.innerHTML = `
         <div class="forge-3d-label-pin"></div>
         <div class="forge-3d-label-card">
@@ -1334,8 +1480,9 @@
         p.el.style.transform = `translate(${p.sx.toFixed(1)}px, ${p.sy.toFixed(1)}px)`;
       });
 
-      const HOVER_RADIUS = 60; // pixels — generous so users don't
-                                // need pixel-perfect aim
+      const HOVER_RADIUS = 95; // pixels — generous so users don't
+                                // need pixel-perfect aim. Always-on
+                                // pins give the visual target.
       let hovered = null;
       if (cursor.inside) {
         let best = HOVER_RADIUS * HOVER_RADIUS;
@@ -1351,11 +1498,17 @@
 
       labelEls.forEach((p) => {
         if (p === hovered) {
-          p.el.classList.remove("forge-3d-label-hidden");
           p.el.classList.add("forge-3d-label-active");
         } else {
-          p.el.classList.add("forge-3d-label-hidden");
           p.el.classList.remove("forge-3d-label-active");
+        }
+        /* Pin opacity fades with depth so back-of-scene pins don't
+         * compete with foreground ones. */
+        if (p.onScreen) {
+          const depthFade = 1 - Math.min(1, Math.max(0, (p.depth + 0.6) / 1.6));
+          p.el.style.opacity = String(0.55 + depthFade * 0.45);
+        } else {
+          p.el.style.opacity = "0";
         }
       });
 

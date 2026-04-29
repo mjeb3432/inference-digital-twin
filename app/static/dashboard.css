@@ -880,3 +880,58 @@ h2, h3 {
   color: rgba(242, 247, 255, 0.55);
   letter-spacing: 0.04em;
 }
+
+/* ──────────────────────────────────────────────────────────────────
+ * Dashboard 3D LIVE view — Three.js scene of the user's facility
+ * mounted live alongside the rack-card grid.
+ * ────────────────────────────────────────────────────────────────── */
+.dashboard-view-toggle {
+  display: inline-flex;
+  margin-top: 8px;
+  border: 1px solid var(--border, #23272d);
+  border-radius: 4px;
+  overflow: hidden;
+  background: rgba(8, 9, 11, 0.92);
+}
+.dashboard-view-toggle .view-btn {
+  border: 0;
+  border-radius: 0;
+  padding: 5px 12px;
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  color: var(--dim, #a0a4ab);
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+.dashboard-view-toggle .view-btn + .view-btn {
+  border-left: 1px solid var(--border, #23272d);
+}
+.dashboard-view-toggle .view-btn.active {
+  background: rgba(51, 251, 211, 0.18);
+  color: var(--accent, #33fbd3);
+}
+
+.dashboard-3d-host {
+  position: relative;
+  width: 100%;
+  flex: 1 1 auto;
+  min-height: 540px;
+  background: #04060a;
+  border: 1px solid rgba(51, 251, 211, 0.18);
+  margin-top: 12px;
+  overflow: hidden;
+}
+
+.dashboard-3d-loading {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-family: 'IBM Plex Mono', ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  color: var(--accent, #33fbd3);
+  pointer-events: none;
+}

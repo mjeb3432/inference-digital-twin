@@ -1708,40 +1708,59 @@ select option {
   top: 0;
   left: 0;
   transform: translate(0, 0);
-  /* The card is anchored to the bottom-left of the label point so the
-   * pin sits on the equipment and the card hangs above it. */
   transform-origin: 0 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   pointer-events: none;
   font-family: var(--font-mono, "JetBrains Mono", monospace);
-  /* nudge up so the card sits above the pin */
   margin: -36px 0 0 -1px;
-  transition: opacity 0.16s ease, transform 0.05s linear;
 }
 
-/* By default labels are HIDDEN — only revealed when the cursor hovers
- * close enough that the per-frame loop tags them with -active. The
- * pin is also hidden in -hidden state so the scene stays visually
- * clean until the user wants info. Without this rule the page would
- * be peppered with always-on tags that compete with the 3D model. */
-.forge-3d-label.forge-3d-label-hidden {
+/* The pin marker is ALWAYS visible — gives the user a clear target
+ * to hover over and a discoverability cue that this thing has info.
+ * The label CARD is what hides until hover. */
+.forge-3d-label .forge-3d-label-card {
   opacity: 0;
+  transform: translateY(4px) scale(0.92);
+  transition: opacity 0.16s ease, transform 0.16s ease;
   pointer-events: none;
 }
 
+.forge-3d-label .forge-3d-label-pin {
+  opacity: 0.85;
+  transition: transform 0.16s ease, opacity 0.16s ease;
+  cursor: pointer;
+}
+
+/* Hidden state = pin only, no card */
+.forge-3d-label.forge-3d-label-hidden .forge-3d-label-card {
+  opacity: 0;
+}
+
+/* Active (hovered) state = full card visible, pin enlarged */
 .forge-3d-label.forge-3d-label-active {
-  opacity: 1;
-  pointer-events: none;
   z-index: 6;
-  /* Subtle scale-in so the reveal feels intentional. */
-  animation: forge-3d-label-pop 0.16s ease;
+}
+.forge-3d-label.forge-3d-label-active .forge-3d-label-card {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+.forge-3d-label.forge-3d-label-active .forge-3d-label-pin {
+  transform: scale(1.6);
+  opacity: 1;
 }
 
-@keyframes forge-3d-label-pop {
-  from { transform: translate(var(--lx, 0), var(--ly, 0)) scale(0.92); opacity: 0; }
-  to   { opacity: 1; }
+/* Spawn animation — components fading in when they first appear at
+ * a new phase. The 3D scene applies this class to its overlay
+ * label-pin at mount, then removes it after the transition. */
+.forge-3d-label-spawn .forge-3d-label-pin {
+  animation: forge-3d-pin-spawn 0.6s cubic-bezier(0.32, 1.56, 0.6, 1);
+}
+@keyframes forge-3d-pin-spawn {
+  0%   { transform: scale(0); opacity: 0; }
+  60%  { transform: scale(1.4); opacity: 1; }
+  100% { transform: scale(1); opacity: 0.85; }
 }
 
 .forge-3d-label-pin {
