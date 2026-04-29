@@ -183,14 +183,14 @@
     scene.background = new THREE.Color(0x05070a);
     scene.fog = new THREE.Fog(0x0a1018, 90, 320);
 
-    /* Camera framing — closer to the building so the user can read
-     * the zone labels at default zoom. The building is centred at the
-     * origin; this position looks down at it from the north-east at a
-     * ~35° pitch, which is close to "isometric" and matches the
-     * existing control-room aesthetic. The user can orbit/zoom from
-     * here. */
-    const camera = new THREE.PerspectiveCamera(34, width / height, 0.5, 800);
-    camera.position.set(48, 42, 48);
+    /* Camera framing — closer to the building, framed slightly
+     * UP so the user sees both the data centre AND the sky above
+     * (sun, drifting clouds, the SIMPLY SILICON teaser). The
+     * building still occupies the lower 60% of the frame. The
+     * 40° FOV is a touch wider so more of the atmospheric polish
+     * is visible at default zoom. */
+    const camera = new THREE.PerspectiveCamera(40, width / height, 0.5, 800);
+    camera.position.set(52, 38, 52);
 
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -237,59 +237,159 @@
     rim.position.set(0, CEILING_Y - 1, 0);
     scene.add(rim);
 
-    /* ---------- Sun + clouds (atmospheric polish) ---------- */
-    /* The sun is a glowing sphere that follows the key-light direction
-     * — when the user orbits, the sun stays anchored to the sky.
-     * Also adds a subtle lens flare disk that sits around the sphere
-     * for an "afternoon" feel without going full bloom-shader. */
+    /* ---------- Sun (warm orange with glow halos) ---------- */
+    /* Bright orange sun with a hot inner core, an amber middle
+     * halo, and a deep red-orange outer corona. Positioned high in
+     * the upper-LEFT of the default camera frustum so it's always
+     * visible at the default orbit angle.
+     *
+     * IMPORTANT: the sun is a static piece of scenery — the
+     * OrbitControls.target stays anchored at the BUILDING (0, 12, 0)
+     * regardless of where the sun sits, so the user's POV never
+     * snaps to the sun. */
     const sun = new THREE.Mesh(
-      new THREE.SphereGeometry(8, 24, 16),
-      new THREE.MeshBasicMaterial({ color: 0xfff2cc, transparent: true, opacity: 0.95 })
+      new THREE.SphereGeometry(7, 32, 20),
+      new THREE.MeshBasicMaterial({ color: 0xffb168, transparent: true, opacity: 0.98 })
     );
-    /* Position the sun moderately off to the upper-right so it's
-     * visible at the default isometric camera angle without the
-     * user having to orbit up. */
-    sun.position.set(120, 78, 80);
+    /* Lower altitude (y=42) so the full sun disk + halos sit
+     * comfortably in the upper third of the default frame instead
+     * of being clipped by the canvas top edge. */
+    sun.position.set(-65, 42, -55);
     scene.add(sun);
 
-    const sunHalo = new THREE.Mesh(
-      new THREE.SphereGeometry(14, 24, 16),
-      new THREE.MeshBasicMaterial({ color: 0xffd166, transparent: true, opacity: 0.18, side: THREE.BackSide })
+    /* Three nested halos for a believable "warm orange glow" — each
+     * progressively wider + more transparent. BackSide rendering on
+     * the outer two makes them read as soft volumetric glow rather
+     * than solid spheres. */
+    const sunHaloInner = new THREE.Mesh(
+      new THREE.SphereGeometry(11, 28, 18),
+      new THREE.MeshBasicMaterial({ color: 0xff8a3c, transparent: true, opacity: 0.45, side: THREE.BackSide })
     );
-    sunHalo.position.copy(sun.position);
-    scene.add(sunHalo);
+    sunHaloInner.position.copy(sun.position);
+    scene.add(sunHaloInner);
 
-    /* Drifting clouds — flat soft-edged sphere "puffs" placed up high
-     * in the sky. They translate slowly across the X-axis in the
-     * render loop so the sky feels alive. */
-    const cloudGroup = new THREE.Group();
+    const sunHaloMid = new THREE.Mesh(
+      new THREE.SphereGeometry(18, 24, 16),
+      new THREE.MeshBasicMaterial({ color: 0xff6a1a, transparent: true, opacity: 0.22, side: THREE.BackSide })
+    );
+    sunHaloMid.position.copy(sun.position);
+    scene.add(sunHaloMid);
+
+    const sunHaloOuter = new THREE.Mesh(
+      new THREE.SphereGeometry(28, 20, 14),
+      new THREE.MeshBasicMaterial({ color: 0xd44a1a, transparent: true, opacity: 0.10, side: THREE.BackSide })
+    );
+    sunHaloOuter.position.copy(sun.position);
+    scene.add(sunHaloOuter);
+
+    /* Warm point light cast FROM the sun's position so the building
+     * and equipment pick up an orange glow on the sun-facing side. */
+    const sunLight = new THREE.PointLight(0xffaa55, 0.45, 480, 1.5);
+    sunLight.position.copy(sun.position);
+    scene.add(sunLight);
+
+    /* ---------- Clouds ----------
+     *
+     * Clouds are distributed in a FULL CIRCLE around the scene so
+     * the user sees them no matter what orbit angle they pick.
+     * Each cloud follows its own circular orbit around the world Y
+     * axis at slightly different radius + speed so the sky drifts
+     * without any one cloud catching up to another.
+     *
+     * Plus one special "teaser" cloud that bears a SIMPLY SILICON
+     * banner texture — a slow Easter egg that floats around the
+     * scene every ~80s.
+     */
     const cloudMat = new THREE.MeshBasicMaterial({
-      color: 0xc8d4e0, transparent: true, opacity: 0.55,
+      color: 0xc8d4e0, transparent: true, opacity: 0.55, depthWrite: false,
     });
-    for (let c = 0; c < 8; c++) {
+
+    const clouds = [];
+    const CLOUD_COUNT = 14;
+    for (let c = 0; c < CLOUD_COUNT; c++) {
       const cloud = new THREE.Group();
-      /* Each cloud is a cluster of 3-5 spheres of varied size for a
-       * lumpy, non-perfect silhouette. */
       const puffs = 3 + (c % 3);
       for (let p = 0; p < puffs; p++) {
-        const r = 3.5 + (p * 0.7) % 2.5;
+        /* Bigger puffs (6-10 units) so the clouds read clearly even
+         * at orbit-distance. Each cluster is a lumpy combination so
+         * the silhouette never looks like a perfect sphere stack. */
+        const r = 6 + ((p * 1.4) % 4) + (c % 2) * 1.4;
         const puff = new THREE.Mesh(new THREE.SphereGeometry(r, 12, 10), cloudMat);
-        puff.position.set((p - puffs / 2) * 3.5, (p % 2 === 0 ? 0 : 0.6), (p * 0.5) % 1.4);
+        puff.position.set((p - puffs / 2) * 5.4, (p % 2 === 0 ? 0 : 1.0), (p * 0.7) % 2.2);
         cloud.add(puff);
       }
-      /* Clouds at y ≈ 38–55 — visible from the default isometric
-       * camera angle (eye y=42 looking at target y=1) without needing
-       * the user to orbit up. */
+      /* Each cloud orbits at its own radius (110-200) and altitude
+       * (28-50). Closer + lower than before so they're visible from
+       * the default camera angle without orbiting up. */
+      const angle0 = (c / CLOUD_COUNT) * Math.PI * 2 + (c * 0.31);
+      const radius = 110 + (c * 13) % 90;
+      const altitude = 28 + (c * 4.1) % 22;
+      const speed = 0.018 + (c % 4) * 0.006; // rad/s — full lap every ~60-110s
+      cloud.userData = { angle: angle0, radius, altitude, speed };
       cloud.position.set(
-        (c * 60 - 200) % 320,
-        38 + ((c * 7) % 18),
-        -160 + (c * 33) % 320
+        Math.cos(angle0) * radius,
+        altitude,
+        Math.sin(angle0) * radius
       );
-      cloud.userData.driftSpeed = 0.7 + (c % 3) * 0.3;
-      cloudGroup.add(cloud);
+      scene.add(cloud);
+      clouds.push(cloud);
     }
-    cloudGroup.userData.kind = "cloud-group";
-    scene.add(cloudGroup);
+
+    /* ---------- SIMPLY SILICON teaser cloud ---------- */
+    /* A flat plane with a CanvasTexture that draws the text
+     * "SIMPLY SILICON" in mint on a soft cloud-puff backdrop. The
+     * plane uses a `Sprite` so it always faces the camera (no need
+     * to billboard manually). Floats at a higher altitude on a
+     * slower orbit so it reads as a deliberate Easter egg. */
+    const teaserCanvas = document.createElement("canvas");
+    teaserCanvas.width = 1024;
+    teaserCanvas.height = 256;
+    const tctx = teaserCanvas.getContext("2d");
+    /* Soft cloud puff backdrop — radial gradient so edges feather. */
+    const grad = tctx.createRadialGradient(512, 128, 60, 512, 128, 480);
+    grad.addColorStop(0,   "rgba(212, 222, 232, 0.92)");
+    grad.addColorStop(0.45,"rgba(200, 212, 224, 0.70)");
+    grad.addColorStop(0.85,"rgba(190, 204, 218, 0.20)");
+    grad.addColorStop(1,   "rgba(190, 204, 218, 0.00)");
+    tctx.fillStyle = grad;
+    tctx.fillRect(0, 0, 1024, 256);
+    /* Tiny mint dot prefix to match the THE FORGE branding chip */
+    tctx.fillStyle = "#33fbd3";
+    tctx.beginPath();
+    tctx.arc(232, 132, 8, 0, Math.PI * 2);
+    tctx.fill();
+    /* Mint glow shadow for the wordmark */
+    tctx.shadowColor = "rgba(51, 251, 211, 0.65)";
+    tctx.shadowBlur = 22;
+    tctx.fillStyle = "#33fbd3";
+    tctx.font = "bold 92px 'JetBrains Mono', monospace";
+    tctx.textBaseline = "middle";
+    tctx.textAlign = "left";
+    tctx.fillText("SIMPLY SILICON", 254, 132);
+    /* Subtle subtitle under the wordmark */
+    tctx.shadowBlur = 0;
+    tctx.fillStyle = "rgba(160, 200, 220, 0.85)";
+    tctx.font = "26px 'JetBrains Mono', monospace";
+    tctx.fillText("AI INFRA, INDUSTRIALISED.", 254, 196);
+
+    const teaserTex = new THREE.CanvasTexture(teaserCanvas);
+    teaserTex.minFilter = THREE.LinearFilter;
+    teaserTex.magFilter = THREE.LinearFilter;
+    const teaserMat = new THREE.SpriteMaterial({
+      map: teaserTex, transparent: true, opacity: 0.95, depthWrite: false,
+    });
+    const teaserSprite = new THREE.Sprite(teaserMat);
+    /* The teaser sprite is sized in world units: 80 wide × 20 tall
+     * so the wordmark is legible at orbit distance. Slow drift
+     * (one lap every ~80s) at altitude 56 above the regular cloud
+     * layer so it reads as a special-feature banner. */
+    teaserSprite.scale.set(80, 20, 1);
+    teaserSprite.userData = {
+      angle: Math.PI * 0.25, radius: 150, altitude: 56, speed: 0.0078,
+      teaser: true,
+    };
+    scene.add(teaserSprite);
+    clouds.push(teaserSprite); // cloud orbit logic also moves it
 
     /* Skybox-like sphere — gives a subtle horizon gradient instead
      * of a flat black background. Inside-out box with a vertical
@@ -1841,7 +1941,10 @@
 
     /* ---------- Orbit controls ---------- */
     const controls = new THREE.OrbitControls(camera, renderer.domElement);
-    controls.target.set(0, 1, 0);
+    /* Target at y=12 (mid-building height) instead of y=1 (ground)
+     * so the camera tilts less steeply downward — leaves the upper
+     * half of the frame for sky / sun / clouds. */
+    controls.target.set(0, 12, 0);
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
     controls.minDistance = 12;
@@ -1913,21 +2016,35 @@
         windRotor.rotation.z = dt * 0.6;
       }
 
-      /* Drifting clouds — translate each cloud cluster along +X at
-       * its own speed; wrap around when it leaves the world's right
-       * edge so the sky never empties out. */
-      if (cloudGroup) {
-        cloudGroup.children.forEach((cloud) => {
-          cloud.position.x += (cloud.userData.driftSpeed || 1) * 0.012;
-          if (cloud.position.x > 220) cloud.position.x = -220;
-        });
+      /* Clouds drift along circular orbits around the scene's Y
+       * axis — each at its own radius / altitude / angular speed.
+       * The teaser sprite uses the same orbit math so the
+       * SIMPLY SILICON banner always faces the camera (Sprite). */
+      for (let i = 0; i < clouds.length; i++) {
+        const cloud = clouds[i];
+        const ud = cloud.userData;
+        ud.angle += ud.speed * 0.016; // ~16ms frame → 0.016 of speed
+        cloud.position.x = Math.cos(ud.angle) * ud.radius;
+        cloud.position.z = Math.sin(ud.angle) * ud.radius;
+        /* Keep altitude stable; subtle bob so each cloud has its own
+         * gentle vertical wobble. */
+        cloud.position.y = ud.altitude + Math.sin(dt * 0.4 + i) * 0.6;
       }
 
-      /* Sun + halo subtle bobbing so the sky has barely-perceptible
-       * motion (like late-afternoon haze shimmer). */
-      sun.position.y = 78 + Math.sin(dt * 0.15) * 1.5;
-      sunHalo.position.copy(sun.position);
-      sunHalo.material.opacity = 0.16 + Math.sin(dt * 0.3) * 0.04;
+      /* Sun + halos subtle bobbing so the sky has barely-perceptible
+       * motion (like late-afternoon haze shimmer). All three halo
+       * spheres + the cast point light track the sun. */
+      const sunY = 42 + Math.sin(dt * 0.15) * 1.5;
+      sun.position.y = sunY;
+      sunHaloInner.position.copy(sun.position);
+      sunHaloMid.position.copy(sun.position);
+      sunHaloOuter.position.copy(sun.position);
+      sunLight.position.copy(sun.position);
+      /* Each halo breathes at a slightly different cadence for a
+       * "shimmer" effect (no two layers pulse together). */
+      sunHaloInner.material.opacity = 0.42 + Math.sin(dt * 0.5) * 0.06;
+      sunHaloMid.material.opacity   = 0.20 + Math.sin(dt * 0.35 + 1.2) * 0.05;
+      sunHaloOuter.material.opacity = 0.09 + Math.sin(dt * 0.25 + 2.4) * 0.03;
       controls.update();
       renderer.render(scene, camera);
 
@@ -1980,8 +2097,11 @@
       camera,
       controls,
       recenter() {
-        camera.position.set(48, 42, 48);
-        controls.target.set(0, 1, 0);
+        /* Reset to the default building-anchored framing — never
+         * the sun's position. The OrbitControls.target is always
+         * the data-centre, even after the camera orbits. */
+        camera.position.set(52, 38, 52);
+        controls.target.set(0, 12, 0);
         controls.update();
       },
     };
