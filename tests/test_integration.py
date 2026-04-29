@@ -102,7 +102,9 @@ def test_run_pipeline_to_report(client) -> None:
 
 
 def test_ui_routes_render(client) -> None:
-    for path in ["/explorer", "/runs", "/artifacts"]:
+    # /explorer was removed in the post-MVP cleanup — only the
+    # backend-driven /runs and /artifacts pages remain.
+    for path in ["/runs", "/artifacts"]:
         response = client.get(path)
         assert response.status_code == 200
         assert "Inference Digital Twin" in response.text

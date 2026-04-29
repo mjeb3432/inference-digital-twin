@@ -588,14 +588,6 @@
       emitEvent("SESSION_STARTED", { phase: facilityState.phase, schemaVersion: facilityState.scenario.schemaVersion }, "INFO");
     }
 
-    /* Lock the Dashboard / Control Room nav links until the build
-       is at Phase 8. Re-applied after every recalc via the snapshot
-       publisher below so the lock releases live the moment the user
-       lands at Phase 8. */
-    if (window.ForgeState && typeof window.ForgeState.applyNavGate === "function") {
-      window.ForgeState.applyNavGate();
-    }
-
     /* Belt-and-braces: flush state on tab close. Persist is synchronous
        now so this is mostly redundant, but cheap insurance. */
     window.addEventListener("beforeunload", () => {
@@ -676,11 +668,7 @@
       "leftRailNarrowButton",
       "leftRailWideButton",
       "buildLog",
-      "exportScenarioButton",
-      "importScenarioButton",
-      "exportEventLogButton",
       "resetBuildButton",
-      "importScenarioInput",
       "helpPopoverLayer",
       "canvasTitle",
       "siteStatusTag",
@@ -729,10 +717,6 @@
     window.addEventListener("pointermove", onCanvasPointerMove);
     window.addEventListener("pointerup", onCanvasPointerUp);
     window.addEventListener("resize", onViewportResize);
-    el.exportScenarioButton.addEventListener("click", onExportScenario);
-    el.importScenarioButton.addEventListener("click", () => el.importScenarioInput.click());
-    el.importScenarioInput.addEventListener("change", onImportScenarioFile);
-    el.exportEventLogButton.addEventListener("click", onExportEventLog);
     if (el.resetBuildButton) el.resetBuildButton.addEventListener("click", onResetBuild);
     el.helpPopoverLayer.addEventListener("click", onHelpLayerClick);
 
@@ -1409,7 +1393,6 @@
             recalcAll();
             renderAll();
             persistFullFacilityState();
-            publishFacilitySnapshot();
           }
           return;
         }
@@ -1748,14 +1731,6 @@
     el.deployProgress.style.width = `${progress}%`;
   }
 
-  function onExportScenario() {
-    const payload = buildExportPayload();
-    const json = stableStringify(payload);
-    downloadTextFile(`forge-scenario-${facilityState.scenario.id}.json`, json);
-    emitEvent("SCENARIO_EXPORTED", { bytes: json.length, schemaVersion: SCHEMA_VERSION }, "INFO");
-    pushLog(`SCENARIO EXPORTED (${INTEGER.format(json.length)} BYTES)`, "good");
-  }
-
   function onResetBuild() {
     /* Confirm before nuking the user's build — the persisted state
        is the only memory of every phase decision they made. */
@@ -1809,38 +1784,6 @@
 
     pushLog("BUILD RESET — STARTING FRESH AT PHASE 1", "warn");
     emitEvent("BUILD_RESET", { schemaVersion: SCHEMA_VERSION }, "INFO");
-  }
-
-  async function onImportScenarioFile(event) {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (!file) return;
-    if (file.size > 2_000_000) {
-      pushLog("IMPORT BLOCKED — FILE TOO LARGE (>2MB)", "warn");
-      emitEvent("ERROR_PARSE_INPUT", { field: "importScenario", reason: "file_too_large", bytes: file.size }, "ERROR");
-      return;
-    }
-    try {
-      const text = await file.text();
-      const raw = JSON.parse(text);
-      const migrated = migrateScenario(raw);
-      applyImportedScenario(migrated);
-      recalcAll();
-      renderAll();
-      emitEvent("SCENARIO_IMPORTED", { bytes: file.size, schemaVersion: migrated.schemaVersion }, "INFO");
-      pushLog(`SCENARIO IMPORTED — ${migrated.scenario?.name || "UNTITLED"}`, "good");
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "UNKNOWN IMPORT ERROR";
-      pushLog(`IMPORT FAILED — ${msg.toUpperCase()}`, "warn");
-      emitEvent("ERROR_PARSE_INPUT", { field: "importScenario", reason: msg }, "ERROR");
-    }
-  }
-
-  function onExportEventLog() {
-    const lines = facilityState.events.map((entry) => JSON.stringify(sortDeep(entry))).join("\n");
-    downloadTextFile(`forge-events-${facilityState.scenario.id}.ndjson`, `${lines}\n`);
-    emitEvent("EVENT_LOG_EXPORTED", { entries: facilityState.events.length }, "INFO");
-    pushLog(`EVENT LOG EXPORTED (${facilityState.events.length} ENTRIES)`, "good");
   }
 
   function buildExportPayload() {
@@ -2533,25 +2476,15 @@
     hydrateRackCache();
     syncMapStats();
     facilityState.scenario.updatedAt = new Date().toISOString();
-    publishFacilitySnapshot();
     persistFullFacilityState();
-    /* Live-update the global-nav lock state — releases the Dashboard
-       and Control Room links the moment the user reaches Phase 8. */
-    if (window.ForgeState && typeof window.ForgeState.applyNavGate === "function") {
-      window.ForgeState.applyNavGate();
-    }
   }
 
   /* ============================================================
-   * Full-state persistence: survive page reloads + nav.
-   * The user's build is preserved when they click BUILD/DASHBOARD/
-   * CONTROL ROOM in the global nav, refresh the tab, or close +
-   * reopen the browser.
-   *
-   * Distinct from publishFacilitySnapshot() which writes a small
-   * derived snapshot for sibling pages — this one writes the FULL
-   * scenario in the same shape as the export-JSON file, so we can
-   * round-trip it through migrateScenario() on restore.
+   * Full-state persistence: survive page reloads.
+   * The user's build is preserved when they refresh the tab or
+   * close + reopen the browser. The persisted JSON is round-tripped
+   * through migrateScenario() on restore so any field renames
+   * stay backwards-compatible.
    * ============================================================ */
   const FULL_STATE_KEY = "forge:facility:full:v1";
 
@@ -2601,115 +2534,6 @@
      * already entered the hall" flag so the WebGL2 datacenter scan
      * intro plays again — this is a fresh start, not a return visit. */
     try { window.localStorage.removeItem("forge:intro:seen:v1"); } catch (_) {}
-  }
-
-  /* ============================================================
-   * Cross-page sync: publish a compact snapshot to localStorage
-   * after every recalc so the Dashboard and Control Room can
-   * reflect the user's actual build instead of static defaults.
-   * ============================================================ */
-  function publishFacilitySnapshot() {
-    if (typeof window.ForgeState !== "object") return;
-    try {
-      const d = ui.derived || {};
-      const bench = d.bench || {};
-      const gpuKey = facilityState.compute.gpuModel;
-      const gpu = gpuKey && typeof GPU !== "undefined" ? GPU[gpuKey] : null;
-      const stackKey = facilityState.compute.inferenceStack;
-      const stack = stackKey && typeof STACK !== "undefined" ? STACK[stackKey] : null;
-      const cooling = facilityState.facility.coolingType && typeof COOLING !== "undefined" ? COOLING[facilityState.facility.coolingType] : null;
-      const fabricKey = facilityState.networking.fabric;
-      const fabric = fabricKey && typeof FABRIC !== "undefined" ? FABRIC[fabricKey] : null;
-      const intraKey = facilityState.networking.intraNode;
-      const intra = intraKey && typeof INTRA_NODE !== "undefined" ? INTRA_NODE[intraKey] : null;
-      const upsLabel =
-        facilityState.power.upsType === "vrla" ? "Legacy VRLA" :
-        facilityState.power.upsType === "liion" ? "Li-Ion" :
-        facilityState.power.upsType === "supercap" ? "Supercaps + BESS" :
-        null;
-      const tierLabel = facilityState.power.redundancyTier
-        ? facilityState.power.redundancyTier.toUpperCase().replace("T", "TIER ")
-        : null;
-
-      const snapshot = {
-        facility: {
-          cityKey: facilityState.site.cityKey,
-          cityLabel: d.cityLabel || null,
-          locationType: facilityState.site.locationType || null,
-          workloadKey: facilityState.site.workloadProfile,
-          workloadLabel: d.workloadLabel || null,
-          permitTrack: facilityState.site.permittingTrack || null,
-          phase: facilityState.phase,
-          phaseLabel: PHASES[facilityState.phase - 1] || "READY",
-          completedPhases: [...facilityState.completed],
-          acreage: facilityState.site.acreage || 0,
-          siteMaxMw: d.siteMaxMw || 0,
-          warnings: (d.validationWarnings || []).map((w) => ({ severity: "warn", text: String(w) })),
-          errors: (d.validationErrors || []).map((e) => ({ severity: "error", text: String(e) })),
-        },
-        power: {
-          targetMw: facilityState.power.targetMW || 0,
-          tier: facilityState.power.redundancyTier || null,
-          tierLabel,
-          ups: facilityState.power.upsType || null,
-          upsLabel,
-          firmPct: d.powerPortfolio?.firmPct || 0,
-          variablePct: d.powerPortfolio?.variablePct || 0,
-          powerLead: d.powerLead || null,
-          pue: facilityState.facility.pue || 2.0,
-          uptimeProjection: d.uptime || 0,
-        },
-        compute: {
-          gpuModel: gpuKey || null,
-          gpuLabel: gpu?.label || null,
-          gpusPerRack: facilityState.compute.gpusPerRack || 0,
-          rackCount: facilityState.compute.rackCount || 0,
-          totalGpus: d.totalGpus || 0,
-          inferenceStack: stackKey || null,
-          stackLabel: stack?.label || null,
-          rackKw: d.rackKw || 0,
-        },
-        facilityCons: {
-          developer: facilityState.facility.developerType || null,
-          cooling: facilityState.facility.coolingType || null,
-          coolingLabel: cooling?.label || null,
-          powerArchitecture: facilityState.facility.powerArchitecture || null,
-        },
-        network: {
-          intraNode: intraKey || null,
-          intraNodeLabel: intra?.label || null,
-          fabric: fabricKey || null,
-          fabricLabel: fabric?.label || null,
-        },
-        fiber: {
-          accessType: facilityState.fiber.accessType || null,
-          carriers: [...(facilityState.fiber.carriers || [])],
-          ixpRegion: facilityState.fiber.ixpRegion || null,
-          ixpLabel: d.ixpLabel || null,
-        },
-        dcim: {
-          monitoring: facilityState.dcim?.monitoring || null,
-          maintenance: facilityState.dcim?.maintenance || null,
-          coolingTelemetry: facilityState.dcim?.coolingTelemetry || null,
-        },
-        economics: {
-          totalCapex: facilityState.economics.totalCapex || 0,
-          annualOpex: facilityState.economics.annualOpex || 0,
-        },
-        metrics: {
-          ttftMs: bench.ttft || 0,
-          peakTps: bench.peak || 0,
-          achievedTps: bench.tps || 0,
-          maxConcurrent: bench.max || 0,
-          mfu: bench.mfu || 0,
-          mwDraw: d.mwLive || 0,
-        },
-      };
-
-      window.ForgeState.write(snapshot);
-    } catch (err) {
-      console.warn("[forge-state] snapshot failed:", err);
-    }
   }
 
   function enforceLocks() {
@@ -5300,20 +5124,6 @@
     if (facilityState.events.length > 5000) {
       facilityState.events.shift();
     }
-  }
-
-  function stableStringify(value) {
-    return JSON.stringify(sortDeep(value), null, 2);
-  }
-
-  function sortDeep(value) {
-    if (Array.isArray(value)) return value.map(sortDeep);
-    if (!value || typeof value !== "object") return value;
-    const sorted = {};
-    Object.keys(value).sort().forEach((k) => {
-      sorted[k] = sortDeep(value[k]);
-    });
-    return sorted;
   }
 
   function exportActiveDrawing() {

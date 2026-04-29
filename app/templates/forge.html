@@ -22,13 +22,6 @@
     </a>
     <div class="global-nav-links">
       <a href="/forge" class="global-nav-link" data-nav="build">BUILD</a>
-      <!--
-        Dashboard + Control Room are post-MVP — the build flow + 3D
-        live model in /forge are sufficient for the initial demo.
-        Routes still exist on the server, just hidden from the nav.
-      -->
-      <a href="/dashboard" class="global-nav-link" data-nav="dashboard" hidden style="display:none">DASHBOARD</a>
-      <a href="/control-room" class="global-nav-link" data-nav="control-room" hidden style="display:none">CONTROL ROOM</a>
     </div>
     <div class="global-nav-meta">
       <span class="global-nav-status"><span class="led"></span>LIVE</span>
@@ -219,15 +212,9 @@
 
   <!-- WebGL2 intro (vanilla, no three.js dep) -->
   <script src="/static/intro.js?v=20260425c" defer></script>
-  <!-- Cross-page Forge state bridge (must load before forge.js) -->
-  <script src="/static/forge-state.js?v=20260425c" defer></script>
   <!-- Three.js-driven 3D data centre — lazy-loads Three from CDN on first activation. -->
-  <script src="/static/forge-3d.js?v=20260429u" defer></script>
-  <script src="/static/forge.js?v=20260429u" defer></script>
-  <!-- forge-zoom.js (6-LOD scroll-zoom tour) is REMOVED for the MVP —
-       the tour button doesn't add value at this stage and competed
-       with the existing 2D/3D toolbar. -->
-  <!-- <script src="/static/forge-zoom.js?v=20260424a" defer></script> -->
+  <script src="/static/forge-3d.js?v=20260429v" defer></script>
+  <script src="/static/forge.js?v=20260429v" defer></script>
 
   <div class="desktop-banner" role="status">BEST VIEWED ON DESKTOP (1024PX+)</div>
   <div class="forge-backdrop" aria-hidden="true"></div>
@@ -269,16 +256,6 @@
         <h2>BUILD TERMINAL</h2>
         <div class="terminal-actions">
           <button id="resetBuildButton" class="ghost-button ghost-button-danger" type="button" title="Discard the current build and start a fresh facility from Phase 1">RESET BUILD</button>
-          <!--
-            Hidden stubs kept so forge.js's getElementById lookups still
-            resolve. Scenario import/export + event-log export are
-            post-MVP features — UI buttons removed to declutter the
-            terminal panel.
-          -->
-          <button id="exportScenarioButton" type="button" hidden></button>
-          <button id="importScenarioButton" type="button" hidden></button>
-          <button id="exportEventLogButton" type="button" hidden></button>
-          <input id="importScenarioInput" type="file" accept=".json,application/json" hidden />
         </div>
         <div id="buildLog" class="build-log" aria-live="polite"></div>
       </section>
