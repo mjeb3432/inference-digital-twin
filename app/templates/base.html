@@ -16,7 +16,10 @@
   <header class="topbar" role="banner">
     <div class="brand">Inference Digital Twin</div>
     <nav aria-label="Main" class="topnav">
-      <a class="nav-link {% if active_nav == 'explorer' %}active{% endif %}" href="/explorer">Explorer</a>
+      <!-- /explorer removed in MVP cleanup; only the backend-driven
+           /runs and /artifacts admin pages remain. The user-facing
+           build experience lives at /forge. -->
+      <a class="nav-link" href="/forge">Forge</a>
       <a class="nav-link {% if active_nav == 'runs' %}active{% endif %}" href="/runs">Runs</a>
       <a class="nav-link {% if active_nav == 'artifacts' %}active{% endif %}" href="/artifacts">Artifacts</a>
     </nav>

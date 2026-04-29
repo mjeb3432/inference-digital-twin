@@ -38,11 +38,7 @@ The core of the application is **The Forge**, an interactive 8-phase simulator w
 
 Every prediction is versioned, content-hashed, and traceable through a full provenance chain.
 
-Once a build is complete, two companion views unlock:
-- **Dashboard** (`/dashboard`) — rack-floor view of the facility you just built, with live metrics
-- **Control Room** (`/control-room`) — isometric multi-LOD view (Floor → Rack → Chassis → Tray → GPU)
-
-Both pages read your build from `localStorage`, so they reflect the city, GPU, and rack count you actually configured.
+When you reach Phase 8 the facility goes online with a live 3D model — toggle between **3D MODEL** (orbit-camera Three.js scene with the building, outdoor power yard, fiber, IXP uplink, cooling, telemetry scan, and atmospheric polish) and **2D PLAN** (the legacy architectural blueprint).
 
 ---
 
@@ -109,7 +105,7 @@ npm run dev
 
 Then open **[http://localhost:3000](http://localhost:3000)**.
 
-The Jinja templates served from `/forge`, `/dashboard`, and `/control-room` are the canonical UI; the Next.js client is for teams who want to extend it.
+The Jinja template served from `/forge` is the canonical UI; the Next.js client is for teams who want to extend it.
 
 ---
 
