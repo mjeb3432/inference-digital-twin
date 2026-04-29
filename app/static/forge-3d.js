@@ -283,6 +283,27 @@
 
     if (plan.site) {
       const [sx, , sz] = svgToWorld(plan.site.x + plan.site.w / 2, plan.site.y + plan.site.h / 2);
+
+      /* Outer "context" ground — sized to cover everything that ever
+       * sits OUTSIDE the official site rectangle: outdoor power yard
+       * (substation + gensets at -bldgW/2 - 120 SVG units, plus solar
+       * PV at yardX - 160), trees scattered around the perimeter,
+       * compass arrow, light poles. Without this base plate, the yard
+       * + trees float on top of the dark void below. We use a darker
+       * tone so it's clearly outside the parcel boundary. */
+      const yardOffset = sw(plan.building.w * 0.5 + 200);
+      const groundW = Math.max(sw(plan.site.w) + yardOffset * 2.4, sw(plan.site.w) + 80);
+      const groundH = Math.max(sw(plan.site.h) + 60, sw(plan.site.h) * 1.4);
+      const groundGeo = new THREE.BoxGeometry(groundW, 0.18, groundH);
+      const groundMat = new THREE.MeshStandardMaterial({
+        color: 0x0c1218, roughness: 0.96, metalness: 0.0,
+      });
+      const groundMesh = new THREE.Mesh(groundGeo, groundMat);
+      groundMesh.position.set(0, -0.9, 0);
+      groundMesh.receiveShadow = true;
+      worldGroup.add(groundMesh);
+
+      /* Site (parcel) plate — the "owned" land inside the fence line. */
       const siteGeo = new THREE.BoxGeometry(sw(plan.site.w), 0.2, sw(plan.site.h));
       const siteMat = new THREE.MeshStandardMaterial({
         color: sitePal.ground, roughness: 0.95, metalness: 0.0,
@@ -292,7 +313,7 @@
       siteMesh.receiveShadow = true;
       worldGroup.add(siteMesh);
 
-      /* Setback band */
+      /* Setback band — slightly inset, lighter green */
       const setW = sw(plan.site.w - plan.site.setback * 2);
       const setH = sw(plan.site.h - plan.site.setback * 2);
       const setGeo = new THREE.BoxGeometry(setW, 0.1, setH);
@@ -303,6 +324,33 @@
       setMesh.position.set(sx, -0.4, sz);
       setMesh.receiveShadow = true;
       worldGroup.add(setMesh);
+
+      /* A separate gravel pad to the WEST of the parcel — this is
+       * where the outdoor power yard sits. Gives the equipment a
+       * believable surface (gravel hardstanding, like a real DC's
+       * generator yard) instead of floating over dirt. */
+      const yardW = yardOffset * 0.95;
+      const yardH = sw(plan.site.h) * 0.85;
+      const yardX_world = -sw(plan.site.w) * 0.5 - yardOffset * 0.5;
+      const yardGeo = new THREE.BoxGeometry(yardW, 0.16, yardH);
+      const yardMat = new THREE.MeshStandardMaterial({
+        color: 0x1a1f24, roughness: 0.95, metalness: 0.05,
+      });
+      const yardPad = new THREE.Mesh(yardGeo, yardMat);
+      yardPad.position.set(yardX_world, -0.42, 0);
+      yardPad.receiveShadow = true;
+      worldGroup.add(yardPad);
+
+      /* Connecting access road from the parcel to the yard pad —
+       * narrow concrete strip so it reads as utility infrastructure. */
+      const roadGeo = new THREE.BoxGeometry(yardOffset * 0.6, 0.12, 4);
+      const roadMat = new THREE.MeshStandardMaterial({
+        color: 0x2a3138, roughness: 0.8, metalness: 0.05,
+      });
+      const road = new THREE.Mesh(roadGeo, roadMat);
+      road.position.set(yardX_world / 2, -0.4, 0);
+      road.receiveShadow = true;
+      worldGroup.add(road);
 
       /* Location-specific surroundings */
       if (locationType === "rural") {
