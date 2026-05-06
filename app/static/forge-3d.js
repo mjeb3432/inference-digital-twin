@@ -1,14 +1,41 @@
 /**
  * forge-3d.js — Three.js-driven 3D ground-floor data center.
  *
- * Renders the SAME plan that the SVG floor view uses, but as a fully
- * volumetric WebGL scene. The ground floor is the canonical 3D model:
- * data hall, mechanical room, electrical room, MMR, switchgear, plus
- * outdoor power yard (substation, generators, batteries, solar PV
- * arrays, wind PPA marker, SMR pad, fuel farm), rooftop chillers, and
- * the surrounding site grass + perimeter setback. Each major zone has
- * a clean HTML overlay label so the user can tell COMPUTE vs ENERGY
- * vs COOLING vs NETWORK at a glance.
+ * Renders the data center as a fully volumetric WebGL scene anchored
+ * on a real architectural plan: data hall, mechanical room, electrical
+ * room, MMR, switchgear, plus outdoor power yard (substation,
+ * generators, batteries, solar PV arrays, wind PPA marker, SMR pad,
+ * fuel farm), rooftop chillers, and the surrounding site grass +
+ * perimeter setback. Each major zone has a clean HTML overlay label
+ * so the user can tell COMPUTE vs ENERGY vs COOLING vs NETWORK at
+ * a glance.
+ *
+ * Realism overhaul (May 2026):
+ *   - Image-based lighting via a 1k HDRI from PolyHaven's CORS-open
+ *     CDN, lazy-loaded after first paint and converted to a PMREM
+ *     environment map. Falls back gracefully if the CDN is
+ *     unreachable.
+ *   - ACES Filmic tonemapping for cinematic highlight rolloff and
+ *     realistic shadow weight.
+ *   - All major outdoor equipment rebuilt as multi-mesh assemblies
+ *     matching real fabrication patterns: gensets with radiator
+ *     louvers + exhaust stack + control panel, pad-mount transformers
+ *     with HV bushings + cooling fins + oil-fill cap, BESS containers
+ *     with ribbed shell + ventilation slots + status LED bar, fluid
+ *     coolers with axial fan grilles + spinning blade rotors, fuel
+ *     tanks on saddle bands inside a containment dyke, PV arrays
+ *     with frame + cell grid + torque tube + ground posts, and a
+ *     line-up of switchgear cabinets with indicator LEDs.
+ *   - Procedural 64×64 noise textures supply per-material roughness
+ *     micro-detail so flat-color paint reads as real fabricated
+ *     panel rather than CG primitive.
+ *   - RoundedBoxGeometry helper bevels every chamfered enclosure
+ *     so 90° edges no longer scream "primitive cube."
+ *   - Curtain-wall mullions subdivide the ribbon glass into real
+ *     window lights with head + sill rails.
+ *   - Scale anchors (1.8m hi-vis worker silhouette + counterbalance
+ *     forklift) parked at the loading dock instantly anchor the
+ *     building's true size.
  *
  * Why a separate module:
  *   - Three.js is ~400KB; we lazy-load it from a CDN on first 3D
@@ -172,16 +199,134 @@
     await ensureThree();
     const THREE = window.THREE;
 
+    /* ============================================================
+     * REALISM HELPERS
+     * ============================================================
+     *
+     * Three small utilities that turn the plain procedural geometry
+     * into something arch-viz quality without leaving Three.js:
+     *
+     *   1. roundedBox(w, h, d, radius)
+     *      - Returns a chamfered BoxGeometry. A 0.05–0.15 unit
+     *        chamfer is the difference between "primitive cube" and
+     *        "extruded panel with a fabricator's edge break."
+     *      - Implemented via ExtrudeGeometry on a rounded-rect
+     *        shape (no examples/jsm dependency, works on r137).
+     *
+     *   2. loadEnvironmentHDRI(scene, renderer)
+     *      - LAZILY fetches a 1k HDRI from PolyHaven's CORS-open
+     *        CDN AFTER the scene first paints, builds a PMREM
+     *        environment map, and assigns it to scene.environment.
+     *        Every PBR material immediately picks up image-based
+     *        lighting — sky-tinted shadows, real reflections in
+     *        chiller and substation panels.
+     *      - Fails gracefully: if PolyHaven is unreachable the
+     *        analytic light rig stays the only contributor.
+     *      - 1k .hdr is ~1MB and post-paint, so the user never
+     *        waits for it on first mount.
+     *
+     *   3. proceduralNoiseTexture(opts)
+     *      - DataTexture-based fractal noise. Used as a roughness
+     *        modifier or ambient-occlusion stand-in to break up
+     *        the painterly flat-color look of the procedural
+     *        materials. Zero network cost.
+     */
+
+    function roundedBox(w, h, d, radius = Math.min(w, d) * 0.06) {
+      /* Build a 2D rounded-rect on the X–Z plane, then extrude up
+       * by `h`. The result is a chamfered box that reads as a
+       * real fabricated panel rather than a CG primitive. */
+      const r = Math.max(0.001, Math.min(radius, w * 0.49, d * 0.49));
+      const shape = new THREE.Shape();
+      shape.moveTo(-w / 2 + r, -d / 2);
+      shape.lineTo(w / 2 - r, -d / 2);
+      shape.quadraticCurveTo(w / 2, -d / 2, w / 2, -d / 2 + r);
+      shape.lineTo(w / 2, d / 2 - r);
+      shape.quadraticCurveTo(w / 2, d / 2, w / 2 - r, d / 2);
+      shape.lineTo(-w / 2 + r, d / 2);
+      shape.quadraticCurveTo(-w / 2, d / 2, -w / 2, d / 2 - r);
+      shape.lineTo(-w / 2, -d / 2 + r);
+      shape.quadraticCurveTo(-w / 2, -d / 2, -w / 2 + r, -d / 2);
+      const geo = new THREE.ExtrudeGeometry(shape, {
+        depth: h,
+        bevelEnabled: true,
+        bevelThickness: r * 0.4,
+        bevelSize: r * 0.4,
+        bevelOffset: 0,
+        bevelSegments: 2,
+        curveSegments: 6,
+      });
+      /* Extrude is along +Z by default; rotate so the height runs +Y
+       * (Y becomes "up") and translate so the geometry is CENTERED on
+       * the origin — drop-in replacement for BoxGeometry, whose pivot
+       * is also at the centre of the box. After rotateX(-PI/2): old
+       * Z [0..h] → new Y [0..h]. translate by -h/2 to recenter. */
+      geo.rotateX(-Math.PI / 2);
+      geo.translate(0, -h / 2, 0);
+      return geo;
+    }
+
+    function proceduralNoiseTexture({ size = 64, scale = 4, seed = 1 } = {}) {
+      /* Simple value-noise fractal — three octaves of bilinear-blended
+       * pseudo-random samples. Looks like dust/wear/concrete grain on
+       * a roughness map; vastly cheaper than fetching real textures. */
+      const data = new Uint8Array(size * size * 4);
+      const rand = (i, j) => {
+        const x = Math.sin(i * 12.9898 + j * 78.233 + seed * 37.719) * 43758.5453;
+        return x - Math.floor(x);
+      };
+      const sampleOctave = (u, v, freq) => {
+        const x = u * freq;
+        const y = v * freq;
+        const xi = Math.floor(x);
+        const yi = Math.floor(y);
+        const xf = x - xi;
+        const yf = y - yi;
+        const a = rand(xi, yi);
+        const b = rand(xi + 1, yi);
+        const c = rand(xi, yi + 1);
+        const d = rand(xi + 1, yi + 1);
+        const u1 = xf * xf * (3 - 2 * xf);
+        const v1 = yf * yf * (3 - 2 * yf);
+        return a * (1 - u1) * (1 - v1) + b * u1 * (1 - v1) + c * (1 - u1) * v1 + d * u1 * v1;
+      };
+      for (let j = 0; j < size; j++) {
+        for (let i = 0; i < size; i++) {
+          const u = i / size;
+          const v = j / size;
+          let n = 0;
+          let amp = 0.55;
+          let freq = scale;
+          for (let o = 0; o < 3; o++) {
+            n += sampleOctave(u, v, freq) * amp;
+            amp *= 0.5;
+            freq *= 2;
+          }
+          const g = Math.max(0, Math.min(255, Math.round(n * 255)));
+          const idx = (j * size + i) * 4;
+          data[idx] = g;
+          data[idx + 1] = g;
+          data[idx + 2] = g;
+          data[idx + 3] = 255;
+        }
+      }
+      const tex = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
+      tex.wrapS = THREE.RepeatWrapping;
+      tex.wrapT = THREE.RepeatWrapping;
+      tex.needsUpdate = true;
+      return tex;
+    }
+
     /* ---------- Renderer + scene ---------- */
     const width = container.clientWidth || 1200;
     const height = container.clientHeight || 720;
 
     const scene = new THREE.Scene();
-    /* Skybox gradient sphere is added below — leave background as
-     * a solid fallback in case the shader fails. Fog still helps
-     * sell the depth at long viewing angles. */
-    scene.background = new THREE.Color(0x05070a);
-    scene.fog = new THREE.Fog(0x0a1018, 90, 320);
+    /* Sky-tinted background — slightly warmer than pure black so the
+     * later HDRI swap-in doesn't read as a full reset. Fog still sells
+     * the depth at long viewing angles. */
+    scene.background = new THREE.Color(0x0d1620);
+    scene.fog = new THREE.Fog(0x12202c, 110, 360);
 
     /* Camera framing — closer to the building, framed slightly
      * UP so the user sees both the data centre AND the sky above
@@ -199,14 +344,31 @@
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     if ("outputColorSpace" in renderer) renderer.outputColorSpace = THREE.SRGBColorSpace;
     else if ("outputEncoding" in renderer) renderer.outputEncoding = THREE.sRGBEncoding;
+
+    /* ACES Filmic tonemap — the cinematic standard. Compresses sun
+     * highlights into believable shoulder rolloff (instead of clipping
+     * to white), and pulls shadow detail out of the floor. The single
+     * biggest "looks more real" delta after IBL.
+     * Exposure 1.05 lifts the scene a hair so the 0x0d1620 background
+     * doesn't crush in dark environments. */
+    if (THREE.ACESFilmicToneMapping !== undefined) {
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 1.05;
+    }
+
+    /* Sticking with PCFSoftShadowMap — broadly compatible across
+     * integrated GPUs. VSM has softer penumbra but variance-shadow
+     * artifacts and higher memory cost on low-end devices weren't
+     * worth the risk for this MVP. */
+
     container.appendChild(renderer.domElement);
     renderer.domElement.classList.add("forge-3d-canvas");
 
     /* ---------- Lighting ---------- */
-    /* Three-light rig: a hemisphere for soft sky+ground bounce, a
-     * directional sun for sharp shadows + form, and a warm fill
-     * to keep shadows from going flat. Plus a mint accent rim light
-     * for the "inference fabric" vibe. */
+    /* Analytic three-light rig — provides immediate sensible lighting
+     * before the HDRI lands. Once IBL is online (loadEnvironmentHDRI
+     * below), the hemisphere/ambient intensities are dimmed because the
+     * environment map carries the diffuse contribution. */
     const hemi = new THREE.HemisphereLight(0x88aacc, 0x0a1820, 0.55);
     scene.add(hemi);
 
@@ -214,7 +376,7 @@
     scene.add(ambient);
 
     /* Cool sun-like key light */
-    const keyLight = new THREE.DirectionalLight(0xfff1e0, 0.75);
+    const keyLight = new THREE.DirectionalLight(0xfff1e0, 0.85);
     keyLight.position.set(80, 110, 60);
     keyLight.castShadow = true;
     keyLight.shadow.mapSize.set(2048, 2048);
@@ -225,12 +387,75 @@
     keyLight.shadow.camera.top = 120;
     keyLight.shadow.camera.bottom = -120;
     keyLight.shadow.bias = -0.0005;
+    /* shadow.radius applies under VSM; PCFSoft uses mapSize for
+     * quality. Leaving at default for broad compatibility. */
     scene.add(keyLight);
 
     /* Warm fill light to lift shadow detail */
     const fill = new THREE.DirectionalLight(0xff9a6e, 0.16);
     fill.position.set(-50, 30, -60);
     scene.add(fill);
+
+    /* ---------- Image-based lighting (IBL) — async post-paint ----------
+     * Fetched lazily so the user never blocks on this. PolyHaven has a
+     * CORS-open CDN; if the fetch fails (offline, blocked, etc.) the
+     * analytic lights above keep the scene perfectly viable. */
+    let pmremGenerator = null;
+    function loadEnvironmentHDRI() {
+      /* Three.js r137 ships RGBELoader as a global on examples/js. We
+       * lazy-load that script before the HDRI fetch. */
+      const RGBE_URL = `https://unpkg.com/three@${THREE_VERSION}/examples/js/loaders/RGBELoader.js`;
+      /* "kloofendal_43d_clear" is a clean midday sky from PolyHaven —
+       * neutral colour temperature, soft clouds, suits a DC site. */
+      const HDRI_URL =
+        "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/kloofendal_43d_clear_1k.hdr";
+
+      return loadScriptOnce(RGBE_URL)
+        .then(() => {
+          if (!THREE.RGBELoader) return null;
+          return new Promise((resolve, reject) => {
+            new THREE.RGBELoader().load(
+              HDRI_URL,
+              (texture) => resolve(texture),
+              undefined,
+              (err) => reject(err),
+            );
+          });
+        })
+        .then((hdrTex) => {
+          if (!hdrTex || pmremGenerator === null) return;
+          /* PMREM = pre-filtered mipmapped radiance environment map.
+           * Standard Three.js IBL pipeline. */
+          const envMap = pmremGenerator.fromEquirectangular(hdrTex).texture;
+          hdrTex.dispose();
+          /* scene.environment provides diffuse + specular IBL to every
+           * MeshStandardMaterial automatically — no per-material wiring
+           * needed. */
+          scene.environment = envMap;
+          /* Now that IBL is online, dim the analytic ambient/hemi
+           * since they were over-compensating for the missing diffuse
+           * environment contribution. The directional sun stays full
+           * strength so shadows still have direction and form. */
+          hemi.intensity = 0.18;
+          ambient.intensity = 0.04;
+          renderer.toneMappingExposure = 0.95;
+        })
+        .catch(() => {
+          /* Silently fall back. Analytic lights remain authoritative. */
+        });
+    }
+    /* Defer HDRI fetch until after the first frame paints so it never
+     * blocks initial scene visibility. PMREMGenerator must be created
+     * eagerly (cheap) since we need it inside the async callback. */
+    if (THREE.PMREMGenerator !== undefined) {
+      pmremGenerator = new THREE.PMREMGenerator(renderer);
+      pmremGenerator.compileEquirectangularShader();
+      /* Use rAF rather than setTimeout(0) so the first WebGL frame is
+       * actually drawn before we kick off the HDRI fetch. */
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => loadEnvironmentHDRI());
+      });
+    }
 
     /* Mint-accent rim light inside the data hall */
     const rim = new THREE.PointLight(0x33fbd3, 1.4, 160, 1.6);
@@ -860,6 +1085,18 @@
       });
       const seamMat = new THREE.LineBasicMaterial({ color: 0x0a0e12, transparent: true, opacity: 0.7 });
 
+      /* Aluminium mullion material — bright extruded frame profile
+       * that subdivides the glass ribbon into individual window
+       * lights. The single biggest "this is a real curtain wall"
+       * tell at the scale of the building shell. */
+      const mullionMat = new THREE.MeshStandardMaterial({
+        color: 0xb8c0c8,
+        roughness: 0.42,
+        metalness: 0.78,
+        emissive: 0x101216,
+        emissiveIntensity: 0.1,
+      });
+
       function placeWall(w, d, x, y, z, rotY, panelCount, mat) {
         /* Modern DC façade composition — three horizontal bands per
          * face: bottom 25% solid metal kicker (spandrel), middle 50%
@@ -918,6 +1155,50 @@
           seamTop.rotation.y = rotY;
           worldGroup.add(seamTop);
         }
+
+        /* Vertical mullions across the ribbon glass — twice the
+         * density of the panel seams (so each panel module has 2
+         * window lights). These are real solid bars with thickness so
+         * they read at orbit zoom; cheap (~16 boxes per wall). */
+        const mullionCount = panelCount * 2;
+        const mullionThk = 0.06; // 6 cm IRL aluminum profile
+        const mullionDepth = d * 0.12;
+        const ribbonY = y - BUILDING_HEIGHT / 2 + kickerH + ribbonH / 2;
+        for (let m = 1; m < mullionCount; m++) {
+          const t = m / mullionCount;
+          const mx = -w / 2 + t * w;
+          const mullion = new THREE.Mesh(
+            new THREE.BoxGeometry(mullionThk, ribbonH, mullionDepth),
+            mullionMat,
+          );
+          mullion.position.set(mx, 0, d / 2);
+          /* Compose with the wall's local frame */
+          const wallGroup = new THREE.Group();
+          wallGroup.position.set(x, ribbonY, z);
+          wallGroup.rotation.y = rotY;
+          wallGroup.add(mullion);
+          worldGroup.add(wallGroup);
+        }
+
+        /* Top + bottom horizontal mullions framing the glass
+         * ribbon — these read as the head and sill rails of the
+         * curtain wall. Slightly thicker than the verticals. */
+        const sillThk = 0.08;
+        for (const sillY of [
+          y - BUILDING_HEIGHT / 2 + kickerH - sillThk * 0.4,
+          y - BUILDING_HEIGHT / 2 + kickerH + ribbonH + sillThk * 0.4,
+        ]) {
+          const sill = new THREE.Mesh(
+            new THREE.BoxGeometry(w * 0.99, sillThk, mullionDepth * 1.05),
+            mullionMat,
+          );
+          sill.position.set(0, 0, d / 2);
+          const sillGroup = new THREE.Group();
+          sillGroup.position.set(x, sillY, z);
+          sillGroup.rotation.y = rotY;
+          sillGroup.add(sill);
+          worldGroup.add(sillGroup);
+        }
       }
 
       /* North wall (facing +Z): full solid */
@@ -949,6 +1230,149 @@
       dockPad.position.set(dockOff, 0.3, -D / 2 - 1.4);
       dockPad.receiveShadow = true;
       worldGroup.add(dockPad);
+
+      /* ---------- SCALE ANCHORS ----------
+       * A 1.8m human silhouette and a counter-balance forklift parked
+       * at the dock. Tiny cost (~12 meshes total) and instantly
+       * communicates the real size of the building — a 30,000 sqft
+       * compute hall with no people in it reads as a toy. With these
+       * two props the user immediately feels the scale.
+       */
+      const anchorGroup = new THREE.Group();
+
+      /* Human silhouette — head + torso + legs. Rendered in a soft
+       * mid-grey so it doesn't compete with the equipment for
+       * attention. ~1.8m tall, parked next to the dock pad. */
+      const skinMat = new THREE.MeshStandardMaterial({
+        color: 0x4f5560, roughness: 0.85, metalness: 0,
+      });
+      const hiVisMat = new THREE.MeshStandardMaterial({
+        color: 0xff8a3a, roughness: 0.55, metalness: 0,
+        emissive: 0xff8a3a, emissiveIntensity: 0.18,
+      });
+      const human = new THREE.Group();
+      const torso = new THREE.Mesh(
+        roundedBox(0.45, 0.7, 0.25, 0.05),
+        hiVisMat, // hi-vis vest
+      );
+      torso.position.y = 0.6 + 0.35; // legs 0.6, torso starts above
+      human.add(torso);
+      const legs = new THREE.Mesh(
+        roundedBox(0.4, 0.85, 0.22, 0.04),
+        skinMat,
+      );
+      legs.position.y = 0.85 / 2;
+      human.add(legs);
+      const head = new THREE.Mesh(
+        new THREE.SphereGeometry(0.13, 12, 10),
+        skinMat,
+      );
+      head.position.y = 0.6 + 0.7 + 0.13 + 0.02;
+      human.add(head);
+      /* Hardhat */
+      const hat = new THREE.Mesh(
+        new THREE.SphereGeometry(0.14, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2),
+        new THREE.MeshStandardMaterial({
+          color: 0xffae42, roughness: 0.6, metalness: 0,
+        }),
+      );
+      hat.position.y = 0.6 + 0.7 + 0.13 + 0.08;
+      human.add(hat);
+      human.position.set(dockOff + dockW / 2 + 0.6, 0, -D / 2 - 1.0);
+      human.castShadow = true;
+      human.receiveShadow = true;
+      human.traverse((m) => { m.castShadow = true; });
+      anchorGroup.add(human);
+
+      /* Forklift — counterbalance lift truck. Tiny lowpoly assembly:
+       * - Yellow chassis
+       * - Driver seat back
+       * - Mast (2 vertical rails)
+       * - Forks (2 horizontal prongs)
+       * - 4 wheels
+       */
+      const forklift = new THREE.Group();
+      const liftMat = new THREE.MeshStandardMaterial({
+        color: 0xffae42, roughness: 0.5, metalness: 0.5,
+        emissive: 0x2a1a08, emissiveIntensity: 0.16,
+      });
+      const liftDarkMat = new THREE.MeshStandardMaterial({
+        color: 0x2c2f33, roughness: 0.7, metalness: 0.3,
+      });
+      const wheelMat = new THREE.MeshStandardMaterial({
+        color: 0x16181b, roughness: 0.92, metalness: 0,
+      });
+
+      /* Chassis */
+      const chassis = new THREE.Mesh(
+        roundedBox(1.0, 0.55, 1.6, 0.06),
+        liftMat,
+      );
+      chassis.position.y = 0.45;
+      forklift.add(chassis);
+      /* Driver area — open seat back */
+      const seatBack = new THREE.Mesh(
+        roundedBox(0.7, 0.45, 0.08, 0.02),
+        liftMat,
+      );
+      seatBack.position.set(0, 0.95, 0.5);
+      forklift.add(seatBack);
+      /* Overhead guard frame — 4 thin posts + roof bar */
+      const postMat = liftDarkMat;
+      for (const [px2, pz2] of [
+        [-0.45, 0.45], [0.45, 0.45], [-0.45, -0.45], [0.45, -0.45],
+      ]) {
+        const post = new THREE.Mesh(
+          new THREE.BoxGeometry(0.06, 1.0, 0.06),
+          postMat,
+        );
+        post.position.set(px2, 1.2, pz2);
+        forklift.add(post);
+      }
+      const roof = new THREE.Mesh(
+        new THREE.BoxGeometry(1.0, 0.06, 1.0),
+        postMat,
+      );
+      roof.position.set(0, 1.7, 0);
+      forklift.add(roof);
+
+      /* Mast — 2 vertical rails out front */
+      for (const mxs of [-0.25, 0.25]) {
+        const rail = new THREE.Mesh(
+          new THREE.BoxGeometry(0.08, 1.6, 0.08),
+          liftDarkMat,
+        );
+        rail.position.set(mxs, 1.0, -0.85);
+        forklift.add(rail);
+      }
+      /* Forks — 2 horizontal prongs at floor level */
+      for (const fxs of [-0.2, 0.2]) {
+        const fork = new THREE.Mesh(
+          new THREE.BoxGeometry(0.08, 0.06, 0.85),
+          liftDarkMat,
+        );
+        fork.position.set(fxs, 0.18, -1.32);
+        forklift.add(fork);
+      }
+      /* Wheels — 4 corners */
+      for (const [wx2, wz2] of [
+        [-0.55, 0.55], [0.55, 0.55], [-0.55, -0.55], [0.55, -0.55],
+      ]) {
+        const wheel = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.22, 0.22, 0.16, 14),
+          wheelMat,
+        );
+        wheel.rotation.z = Math.PI / 2;
+        wheel.position.set(wx2, 0.22, wz2);
+        forklift.add(wheel);
+      }
+
+      forklift.position.set(dockOff - dockW / 2 - 1.0, 0, -D / 2 - 2.4);
+      forklift.rotation.y = -0.4;
+      forklift.traverse((m) => { m.castShadow = true; m.receiveShadow = true; });
+      anchorGroup.add(forklift);
+
+      worldGroup.add(anchorGroup);
 
       /* East wall (facing +X) — has the personnel entrance + small
        * canopy near the centre. */
@@ -1236,22 +1660,89 @@
       });
     }
 
-    /* Electrical (switchgear / MER) */
+    /* Electrical (switchgear / MER)
+     *
+     * A row of low-voltage switchgear cabinets matching the look of
+     * Eaton/Schneider drawout breaker line-ups:
+     *   - Light-grey painted enclosure (chamfered)
+     *   - Front-face split into 3 vertical sections per cabinet
+     *     (incoming bus, breaker compartments, instrumentation panel)
+     *   - Status indicator LEDs (mint = healthy, amber = standby)
+     *   - Door handle + nameplate label
+     */
     if (showInterior && plan.rooms.electrical) {
       const ele = addZoneFloor(plan.rooms.electrical, 0x4b3413, 0.6);
-      /* A row of busbar / switchgear cabinets */
-      const sgMat = new THREE.MeshStandardMaterial({
-        color: 0x5e4322, roughness: 0.5, metalness: 0.55, emissive: 0x261405, emissiveIntensity: 0.5,
+
+      const sgShellMat = new THREE.MeshStandardMaterial({
+        color: 0x9099a3,
+        roughness: 0.5,
+        metalness: 0.6,
+        emissive: 0x141618, emissiveIntensity: 0.18,
       });
-      const sgGeo = new THREE.BoxGeometry(0.9, 2.6, 0.6);
+      const sgPanelMat = new THREE.MeshStandardMaterial({
+        color: 0x6d747e, roughness: 0.55, metalness: 0.55,
+      });
+      const sgSeamMat = new THREE.MeshStandardMaterial({
+        color: 0x18191c, roughness: 0.85, metalness: 0.3,
+      });
+      const sgLedGreen = new THREE.MeshStandardMaterial({
+        color: 0x33fbd3, emissive: 0x33fbd3, emissiveIntensity: 1.7, roughness: 0.3,
+      });
+      const sgLedAmber = new THREE.MeshStandardMaterial({
+        color: 0xffae42, emissive: 0xffae42, emissiveIntensity: 1.4, roughness: 0.3,
+      });
+      const handleMat = new THREE.MeshStandardMaterial({
+        color: 0x2c2f33, roughness: 0.5, metalness: 0.7,
+      });
+
       const sgCount = Math.max(3, Math.round(plan.rooms.electrical.w / 18));
       for (let i = 0; i < sgCount; i++) {
-        const sm = new THREE.Mesh(sgGeo, sgMat);
+        const cab = new THREE.Group();
         const tx = ele.wx - ele.w * 0.4 + (ele.w * 0.8) * (i / Math.max(1, sgCount - 1));
-        sm.position.set(tx, 1.3, ele.wz);
-        sm.castShadow = true;
-        worldGroup.add(sm);
+        cab.position.set(tx, 0, ele.wz);
+
+        /* Main shell */
+        const shell = new THREE.Mesh(roundedBox(0.9, 2.6, 0.6, 0.04), sgShellMat);
+        shell.position.y = 1.3;
+        shell.castShadow = true;
+        cab.add(shell);
+
+        /* Front face split into 3 panels with seam lines */
+        for (let p = 0; p < 3; p++) {
+          const panel = new THREE.Mesh(
+            roundedBox(0.78, 0.78, 0.012, 0.02),
+            sgPanelMat,
+          );
+          panel.position.set(0, 0.36 + p * 0.85, 0.305);
+          cab.add(panel);
+          /* Indicator LED on each panel — alternating green/amber */
+          const led = new THREE.Mesh(
+            new THREE.SphereGeometry(0.025, 6, 6),
+            (i + p) % 3 === 0 ? sgLedAmber : sgLedGreen,
+          );
+          led.position.set(-0.32, 0.55 + p * 0.85, 0.318);
+          cab.add(led);
+        }
+
+        /* Vertical seam between cabinets */
+        const seam = new THREE.Mesh(
+          new THREE.BoxGeometry(0.012, 2.55, 0.62),
+          sgSeamMat,
+        );
+        seam.position.set(0.452, 1.3, 0);
+        cab.add(seam);
+
+        /* Door handle on the middle panel */
+        const handle = new THREE.Mesh(
+          new THREE.BoxGeometry(0.05, 0.18, 0.04),
+          handleMat,
+        );
+        handle.position.set(0.32, 1.21, 0.325);
+        cab.add(handle);
+
+        worldGroup.add(cab);
       }
+
       labelTargets.push({
         x: ele.wx, y: 3.4, z: ele.wz,
         title: "ELECTRICAL ROOM",
@@ -1283,16 +1774,136 @@
     }
 
     /* Switchgear pad (outside building wall) — Phase 2+ since the
-     * substation is part of power procurement. */
+     * substation is part of power procurement.
+     *
+     * Pad-mounted utility transformer assembly:
+     *   - Concrete pad base
+     *   - Main rectangular oil-filled tank (chamfered)
+     *   - Pleated radiator/cooling fins along the long sides
+     *   - Three porcelain HV bushings on top
+     *   - Three smaller LV bushings on the side
+     *   - Oil conservator/fill cap on top
+     *   - Hazard-orange warning placard on the front
+     */
     if (showBuilding && plan.rooms.switchgear) {
       const sg = addZoneFloor(plan.rooms.switchgear, 0x3a2a13, 0.65);
-      const tMat = new THREE.MeshStandardMaterial({
-        color: 0x6a4a1a, roughness: 0.45, metalness: 0.5,
+
+      const tankMat = new THREE.MeshStandardMaterial({
+        color: 0x4d6d3e, // utility-green is the standard pad-mount colour
+        roughness: 0.6,
+        metalness: 0.45,
+        emissive: 0x0a1408, emissiveIntensity: 0.16,
+        roughnessMap: proceduralNoiseTexture({ size: 64, scale: 4, seed: 23 }),
       });
-      const transformer = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.7, 1.6, 8), tMat);
-      transformer.position.set(sg.wx, 0.85, sg.wz);
-      transformer.castShadow = true;
-      worldGroup.add(transformer);
+      const finMat = new THREE.MeshStandardMaterial({
+        color: 0x3d5a32, roughness: 0.7, metalness: 0.4,
+      });
+      const bushingMat = new THREE.MeshStandardMaterial({
+        color: 0xeae3d6, roughness: 0.35, metalness: 0,
+      });
+      const conductorMat = new THREE.MeshStandardMaterial({
+        color: 0x7a8088, roughness: 0.45, metalness: 0.85,
+      });
+      const placardMat = new THREE.MeshStandardMaterial({
+        color: 0xff8a3a, roughness: 0.6, metalness: 0,
+        emissive: 0xff8a3a, emissiveIntensity: 0.22,
+      });
+      const padMat = new THREE.MeshStandardMaterial({
+        color: 0x848890, roughness: 0.95, metalness: 0,
+      });
+
+      const sub = new THREE.Group();
+      sub.position.set(sg.wx, 0, sg.wz);
+
+      /* Concrete pad */
+      const pad = new THREE.Mesh(roundedBox(2.6, 0.18, 2.0, 0.04), padMat);
+      pad.position.y = 0.09;
+      pad.receiveShadow = true;
+      sub.add(pad);
+
+      /* Main oil tank */
+      const tank = new THREE.Mesh(roundedBox(2.0, 1.4, 1.4, 0.06), tankMat);
+      tank.position.y = 0.18 + 0.7;
+      tank.castShadow = true;
+      tank.receiveShadow = true;
+      sub.add(tank);
+
+      /* Cooling fins / pleated radiators along the +Z and -Z faces */
+      const finCount = 8;
+      for (let s of [-1, 1]) {
+        for (let f = 0; f < finCount; f++) {
+          const fin = new THREE.Mesh(
+            new THREE.BoxGeometry(0.05, 1.05, 0.18),
+            finMat,
+          );
+          fin.position.set(
+            -0.85 + (f / (finCount - 1)) * 1.7,
+            0.18 + 0.55,
+            s * 0.78,
+          );
+          sub.add(fin);
+        }
+      }
+
+      /* Three HV bushings on top — porcelain stack with conductor cap */
+      for (let b = 0; b < 3; b++) {
+        const bx2 = -0.55 + b * 0.55;
+        /* Stacked porcelain insulator (flared at base, tapered) */
+        const insulator = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.07, 0.11, 0.55, 12),
+          bushingMat,
+        );
+        insulator.position.set(bx2, 0.18 + 1.4 + 0.275, 0);
+        sub.add(insulator);
+        /* Petticoat rings to read as a real porcelain insulator */
+        for (let r = 0; r < 4; r++) {
+          const ring = new THREE.Mesh(
+            new THREE.TorusGeometry(0.11 - r * 0.005, 0.018, 4, 16),
+            bushingMat,
+          );
+          ring.rotation.x = Math.PI / 2;
+          ring.position.set(bx2, 0.18 + 1.4 + 0.06 + r * 0.13, 0);
+          sub.add(ring);
+        }
+        /* Aluminium cap */
+        const cap = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.09, 0.09, 0.06, 12),
+          conductorMat,
+        );
+        cap.position.set(bx2, 0.18 + 1.4 + 0.58, 0);
+        sub.add(cap);
+      }
+
+      /* Three smaller LV bushings on the front face */
+      for (let b = 0; b < 3; b++) {
+        const bx2 = -0.5 + b * 0.5;
+        const lv = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.05, 0.07, 0.32, 10),
+          bushingMat,
+        );
+        lv.rotation.x = Math.PI / 2;
+        lv.position.set(bx2, 0.18 + 0.4, 0.85);
+        sub.add(lv);
+      }
+
+      /* Oil-fill cap (small disc on top, slightly off-centre) */
+      const fillCap = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.07, 0.07, 0.05, 12),
+        conductorMat,
+      );
+      fillCap.position.set(0.7, 0.18 + 1.42, -0.4);
+      sub.add(fillCap);
+
+      /* Hazard-orange warning placard on the door */
+      const placard = new THREE.Mesh(
+        new THREE.BoxGeometry(0.32, 0.22, 0.012),
+        placardMat,
+      );
+      placard.position.set(0, 1.0, 0.711);
+      sub.add(placard);
+
+      worldGroup.add(sub);
+
       labelTargets.push({
         x: sg.wx, y: 2.4, z: sg.wz,
         title: "UTILITY SUBSTATION",
@@ -1353,13 +1964,19 @@
       /* Racks only spawn at Phase 5+ once compute decisions are
        * locked. Earlier phases just show the empty data hall floor. */
       if (showRacks && slotCount > 0 && racks.installed > 0) {
-        const rackGeo = new THREE.BoxGeometry(1, rackH, 1);
+        /* Server rack chassis — main body. Now uses a chamfered box
+         * so the front/back edges read as fabricated steel rather
+         * than primitive geometry. The procedural-noise roughness
+         * map adds a subtle paint-finish micro-detail across the
+         * whole instanced mesh (same texture is reused, near-free). */
+        const rackGeo = roundedBox(1, rackH, 1, 0.04);
         const rackMat = new THREE.MeshStandardMaterial({
           color: isImmersion ? 0x132a3a : 0x1a2026,
-          roughness: isImmersion ? 0.35 : 0.55,
-          metalness: isImmersion ? 0.65 : 0.45,
+          roughness: isImmersion ? 0.35 : 0.6,
+          metalness: isImmersion ? 0.65 : 0.5,
           emissive: rackEmissive,
-          emissiveIntensity: 0.6,
+          emissiveIntensity: 0.45,
+          roughnessMap: proceduralNoiseTexture({ size: 64, scale: 6, seed: 53 }),
         });
         const installedMesh = new THREE.InstancedMesh(rackGeo, rackMat, racks.installed);
 
@@ -1663,24 +2280,155 @@
     /* ---------- ROOFTOP CHILLERS (cooling continued) ---------- */
     /* Phase 4+ once the user has chosen a cooling type. Air-cooled
      * facilities get a row of rooftop chillers; d2c gets fewer but
-     * larger units; immersion needs only a small heat-rejection skid. */
+     * larger units; immersion needs only a small heat-rejection skid.
+     *
+     * Each chiller is a real fluid-cooler-style assembly:
+     *   - Chamfered painted-steel housing (RoundedBoxGeometry-equivalent)
+     *   - Two top-mounted axial fan wells with grille rings + spinning
+     *     blades (driven from the render loop, not the per-frame mat
+     *     update path so they stay smooth even when the scene rerenders)
+     *   - Side panel seam line
+     *   - Refrigerant-line connection studs at the back
+     */
+    const chillerFanRotors = [];
     if (showCooling && plan.rooms.dataHall) {
       const chillerCount = coolingType === "immersion" ? 2
         : coolingType === "d2c" ? 4
         : 6;
+
+      /* Painted galvanized-steel housing — slightly metallic, mostly
+       * rough so you don't get a chrome look. The procedural noise
+       * roughness map breaks up the flat colour just enough to read
+       * as fabricated panel. */
       const chillerMat = new THREE.MeshStandardMaterial({
-        color: 0x2a4d4a, roughness: 0.45, metalness: 0.65,
-        emissive: 0x102020, emissiveIntensity: 0.35,
+        color: 0x3b6360,
+        roughness: 0.55,
+        metalness: 0.55,
+        emissive: 0x0a1c1c,
+        emissiveIntensity: 0.18,
+        roughnessMap: proceduralNoiseTexture({ size: 64, scale: 6, seed: 7 }),
       });
-      const chillerGeo = new THREE.BoxGeometry(2.0, 1.2, 1.4);
+      /* Dark-grey fan well throat (deep recess for the blades) */
+      const fanWellMat = new THREE.MeshStandardMaterial({
+        color: 0x14181d, roughness: 0.85, metalness: 0.2,
+      });
+      /* Aluminium fan grille — slightly reflective */
+      const grilleMat = new THREE.MeshStandardMaterial({
+        color: 0xb8c0c8, roughness: 0.4, metalness: 0.7,
+      });
+      /* Mint accent blade — keeps the brand on-screen even in the
+       * realistic detail layer */
+      const bladeMat = new THREE.MeshStandardMaterial({
+        color: 0x7fcfb6, roughness: 0.4, metalness: 0.45,
+        emissive: 0x0a3328, emissiveIntensity: 0.4,
+      });
+      const refrigerantMat = new THREE.MeshStandardMaterial({
+        color: 0xe6e8ec, roughness: 0.3, metalness: 0.85,
+      });
+
       for (let i = 0; i < chillerCount; i++) {
-        const cm = new THREE.Mesh(chillerGeo, chillerMat);
         const t = (i + 0.5) / chillerCount;
         const xx = sw(plan.rooms.dataHall.x + plan.rooms.dataHall.w * t) - sw(cx);
         const zz = -sw(plan.building.h) * 0.35;
-        cm.position.set(xx, BUILDING_HEIGHT + 0.65, zz);
-        cm.castShadow = true;
-        worldGroup.add(cm);
+        const baseY = BUILDING_HEIGHT + 0.65;
+
+        const unit = new THREE.Group();
+        unit.position.set(xx, baseY, zz);
+
+        /* Main housing — chamfered box, real proportions for a
+         * 2-fan rooftop fluid cooler. */
+        const housing = new THREE.Mesh(roundedBox(2.4, 1.25, 1.5, 0.08), chillerMat);
+        housing.castShadow = true;
+        housing.receiveShadow = true;
+        unit.add(housing);
+
+        /* Two axial fan wells set into the top */
+        const fanRadius = 0.42;
+        const fanInsetXs = [-0.55, 0.55];
+        for (let k = 0; k < fanInsetXs.length; k++) {
+          const fx = fanInsetXs[k];
+          /* Recessed dark well */
+          const well = new THREE.Mesh(
+            new THREE.CylinderGeometry(fanRadius * 1.05, fanRadius * 1.05, 0.16, 24, 1, true),
+            fanWellMat,
+          );
+          well.position.set(fx, 0.62 + 0.001, 0);
+          unit.add(well);
+
+          /* Aluminium grille ring (thin torus) */
+          const grilleRing = new THREE.Mesh(
+            new THREE.TorusGeometry(fanRadius * 1.02, 0.025, 6, 32),
+            grilleMat,
+          );
+          grilleRing.rotation.x = Math.PI / 2;
+          grilleRing.position.set(fx, 0.7, 0);
+          unit.add(grilleRing);
+
+          /* Cross-bar spokes giving the grille a fan-guard look */
+          for (let s = 0; s < 4; s++) {
+            const spoke = new THREE.Mesh(
+              new THREE.BoxGeometry(fanRadius * 2.05, 0.012, 0.025),
+              grilleMat,
+            );
+            spoke.rotation.y = (s * Math.PI) / 4;
+            spoke.position.set(fx, 0.7, 0);
+            unit.add(spoke);
+          }
+
+          /* Spinning blade rotor — 5 tapered blades, group-rotated
+           * by the render loop animation so all units look alive. */
+          const rotor = new THREE.Group();
+          rotor.position.set(fx, 0.62, 0);
+          const bladeShape = new THREE.Shape();
+          bladeShape.moveTo(-0.04, 0);
+          bladeShape.lineTo(0.04, 0);
+          bladeShape.lineTo(0.02, fanRadius * 0.95);
+          bladeShape.lineTo(-0.02, fanRadius * 0.95);
+          bladeShape.lineTo(-0.04, 0);
+          const bladeGeo = new THREE.ExtrudeGeometry(bladeShape, { depth: 0.04, bevelEnabled: false });
+          for (let b = 0; b < 5; b++) {
+            const blade = new THREE.Mesh(bladeGeo, bladeMat);
+            blade.rotation.y = Math.PI / 2; // lay flat on the fan plane
+            blade.rotation.x = Math.PI / 2;
+            blade.rotation.z = (b * 2 * Math.PI) / 5;
+            rotor.add(blade);
+          }
+          /* Hub cap */
+          const hub = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.06, 0.06, 0.04, 12),
+            grilleMat,
+          );
+          hub.position.y = 0.02;
+          rotor.add(hub);
+          rotor.userData.kind = "chiller-fan";
+          /* Stagger so all 12 fans don't spin in lockstep */
+          rotor.userData.spinOffset = (i * 0.7 + k * 0.3) % (Math.PI * 2);
+          chillerFanRotors.push(rotor);
+          unit.add(rotor);
+        }
+
+        /* Side seam line — a thin dark slit suggesting the access
+         * panel break. Tiny detail, big "real fabricated unit" tell. */
+        const seam = new THREE.Mesh(
+          new THREE.BoxGeometry(2.42, 0.012, 0.012),
+          new THREE.MeshStandardMaterial({ color: 0x0a0d10, roughness: 0.9 }),
+        );
+        seam.position.set(0, 0.05, 0.755);
+        unit.add(seam);
+
+        /* Refrigerant-line connection studs on the back face — two
+         * small cylinders hinting at supply/return. */
+        for (let r = 0; r < 2; r++) {
+          const stud = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.05, 0.05, 0.18, 10),
+            refrigerantMat,
+          );
+          stud.rotation.x = Math.PI / 2;
+          stud.position.set(-0.4 + r * 0.8, -0.25, -0.85);
+          unit.add(stud);
+        }
+
+        worldGroup.add(unit);
       }
     }
 
@@ -1701,21 +2449,136 @@
       worldGroup.add(pad);
     }
 
-    /* Generators */
+    /* Generators — Cat / Cummins-style enclosed diesel gensets.
+     *
+     * Each unit is now an assembled prefab matching the real silhouette
+     * of an outdoor genset enclosure:
+     *   - Main painted-steel sound-attenuated enclosure (chamfered box)
+     *   - Radiator grille on the long end (vertical louvers)
+     *   - Vertical stainless exhaust stack with rain cap
+     *   - Side access door panel with handle
+     *   - Front control-panel display (small mint-emissive LCD)
+     *   - Galvanised skid base
+     *
+     * All gensets are oriented with radiators facing outward and
+     * exhausts pointing skyward so they read at a glance.
+     */
     if (powerMix.gas > 0) {
       addPad(yardX, yardZ0, 6, 6, 0x222a31);
-      const genMat = new THREE.MeshStandardMaterial({
-        color: 0x4a3a22, roughness: 0.55, metalness: 0.45,
-        emissive: 0x1a1208, emissiveIntensity: 0.4,
+
+      const enclosureMat = new THREE.MeshStandardMaterial({
+        color: 0x6f5a2c,
+        roughness: 0.55,
+        metalness: 0.4,
+        emissive: 0x1a1208, emissiveIntensity: 0.18,
+        roughnessMap: proceduralNoiseTexture({ size: 64, scale: 5, seed: 11 }),
       });
+      const louverMat = new THREE.MeshStandardMaterial({
+        color: 0x1c1d1f, roughness: 0.9, metalness: 0.15,
+      });
+      const stackMat = new THREE.MeshStandardMaterial({
+        color: 0xc0c4cc, roughness: 0.35, metalness: 0.85,
+      });
+      const skidMat = new THREE.MeshStandardMaterial({
+        color: 0x363a40, roughness: 0.7, metalness: 0.4,
+      });
+      const handleMat = new THREE.MeshStandardMaterial({
+        color: 0x2a2f35, roughness: 0.5, metalness: 0.7,
+      });
+      const lcdMat = new THREE.MeshStandardMaterial({
+        color: 0x101e18, roughness: 0.3, metalness: 0,
+        emissive: 0x33fbd3, emissiveIntensity: 0.7,
+      });
+
       const genCount = 4;
+      const genGroup = new THREE.Group();
       for (let i = 0; i < genCount; i++) {
-        const gen = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.4, 0.9), genMat);
         const t = (i + 0.5) / genCount;
-        gen.position.set(yardX, padHeight + 0.7, yardZ0 - 2.2 + t * 4.4);
-        gen.castShadow = true;
-        worldGroup.add(gen);
+        const gz = yardZ0 - 2.2 + t * 4.4;
+
+        const gen = new THREE.Group();
+        gen.position.set(yardX, padHeight, gz);
+
+        /* Skid base */
+        const skid = new THREE.Mesh(roundedBox(2.3, 0.12, 1.0, 0.03), skidMat);
+        skid.position.y = 0.06;
+        skid.receiveShadow = true;
+        gen.add(skid);
+
+        /* Main sound-attenuated enclosure */
+        const enclosure = new THREE.Mesh(roundedBox(2.2, 1.25, 0.9, 0.06), enclosureMat);
+        enclosure.position.y = 0.12 + 1.25 / 2;
+        enclosure.castShadow = true;
+        enclosure.receiveShadow = true;
+        gen.add(enclosure);
+
+        /* Radiator grille on the +X end — vertical louvers cover the
+         * front face. Implemented as a series of thin Box meshes. */
+        const louverCount = 12;
+        for (let l = 0; l < louverCount; l++) {
+          const louver = new THREE.Mesh(
+            new THREE.BoxGeometry(0.02, 1.0, 0.85),
+            louverMat,
+          );
+          louver.position.set(
+            1.115,
+            0.12 + 1.25 / 2,
+            -0.42 + (l / (louverCount - 1)) * 0.84,
+          );
+          gen.add(louver);
+        }
+
+        /* Side access door — slightly recessed rectangle with a handle */
+        const door = new THREE.Mesh(
+          roundedBox(1.0, 0.8, 0.02, 0.02),
+          new THREE.MeshStandardMaterial({
+            color: 0x5a4824, roughness: 0.6, metalness: 0.45,
+          }),
+        );
+        door.position.set(0.1, 0.62, 0.461);
+        gen.add(door);
+        const handle = new THREE.Mesh(
+          new THREE.BoxGeometry(0.06, 0.18, 0.05),
+          handleMat,
+        );
+        handle.position.set(-0.32, 0.62, 0.49);
+        gen.add(handle);
+
+        /* Control-panel LCD beside the door */
+        const lcd = new THREE.Mesh(
+          new THREE.BoxGeometry(0.18, 0.12, 0.015),
+          lcdMat,
+        );
+        lcd.position.set(0.62, 0.85, 0.466);
+        gen.add(lcd);
+
+        /* Vertical exhaust stack rising off the rear-top corner */
+        const stackBase = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.08, 0.09, 0.12, 12),
+          stackMat,
+        );
+        stackBase.position.set(-0.85, 1.42, -0.32);
+        gen.add(stackBase);
+        const stack = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.07, 0.07, 0.95, 12),
+          stackMat,
+        );
+        stack.position.set(-0.85, 1.95, -0.32);
+        stack.castShadow = true;
+        gen.add(stack);
+        /* Rain cap — flat disc tilted downward */
+        const cap = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.11, 0.11, 0.02, 14),
+          stackMat,
+        );
+        cap.position.set(-0.85, 2.46, -0.27);
+        cap.rotation.x = 0.2;
+        gen.add(cap);
+
+        genGroup.add(gen);
       }
+      worldGroup.add(genGroup);
+
       labelTargets.push({
         x: yardX, y: 2.6, z: yardZ0,
         title: "GENERATORS",
@@ -1724,21 +2587,121 @@
       });
     }
 
-    /* Battery pack pad */
+    /* Battery (BESS) cabinets — Tesla Megapack-style enclosed lithium
+     * containers. Each cabinet has:
+     *   - Chamfered painted-steel shell
+     *   - Vertical ribs suggesting rolled sheet-metal panels
+     *   - Door panel with handle on one face
+     *   - Top-mounted ventilation grille (heat exhaust)
+     *   - Mint status LED bar across the door
+     *   - Bus bar conduit running along the top connecting all units
+     */
     if (powerMix.gas > 0 || powerMix.solar > 0 || powerMix.wind > 0) {
       const bx = yardX + 9;
       const bz = yardZ0;
       addPad(bx, bz, 5, 5, 0x1a2530);
-      const bessMat = new THREE.MeshStandardMaterial({
-        color: 0x6dd6ff, roughness: 0.4, metalness: 0.6,
-        emissive: 0x0c3548, emissiveIntensity: 0.55,
+
+      const bessShellMat = new THREE.MeshStandardMaterial({
+        color: 0x2c4d68,
+        roughness: 0.5,
+        metalness: 0.55,
+        emissive: 0x081822, emissiveIntensity: 0.22,
+        roughnessMap: proceduralNoiseTexture({ size: 64, scale: 5, seed: 19 }),
       });
+      const ribMat = new THREE.MeshStandardMaterial({
+        color: 0x223e54, roughness: 0.65, metalness: 0.5,
+      });
+      const ventMat = new THREE.MeshStandardMaterial({
+        color: 0x101418, roughness: 0.85, metalness: 0.2,
+      });
+      const ledMat = new THREE.MeshStandardMaterial({
+        color: 0x6dd6ff, roughness: 0.3, metalness: 0,
+        emissive: 0x6dd6ff, emissiveIntensity: 1.6,
+      });
+      const conduitMat = new THREE.MeshStandardMaterial({
+        color: 0x1d242b, roughness: 0.7, metalness: 0.4,
+      });
+      const handleMat = new THREE.MeshStandardMaterial({
+        color: 0x252a30, roughness: 0.5, metalness: 0.7,
+      });
+
+      const bessGroup = new THREE.Group();
       for (let i = 0; i < 3; i++) {
-        const bess = new THREE.Mesh(new THREE.BoxGeometry(1.4, 1.2, 1.4), bessMat);
-        bess.position.set(bx - 1.5 + i * 1.5, padHeight + 0.6, bz);
-        bess.castShadow = true;
-        worldGroup.add(bess);
+        const cab = new THREE.Group();
+        cab.position.set(bx - 1.5 + i * 1.5, padHeight, bz);
+
+        /* Main shell */
+        const shell = new THREE.Mesh(roundedBox(1.4, 1.2, 1.4, 0.06), bessShellMat);
+        shell.position.y = 0.6;
+        shell.castShadow = true;
+        shell.receiveShadow = true;
+        cab.add(shell);
+
+        /* Vertical sheet-metal ribs on side faces */
+        const ribCount = 6;
+        for (let r = 0; r < ribCount; r++) {
+          const rib = new THREE.Mesh(
+            new THREE.BoxGeometry(0.012, 1.0, 0.04),
+            ribMat,
+          );
+          rib.position.set(0.71, 0.6, -0.55 + (r / (ribCount - 1)) * 1.1);
+          cab.add(rib);
+          const ribL = new THREE.Mesh(
+            new THREE.BoxGeometry(0.012, 1.0, 0.04),
+            ribMat,
+          );
+          ribL.position.set(-0.71, 0.6, -0.55 + (r / (ribCount - 1)) * 1.1);
+          cab.add(ribL);
+        }
+
+        /* Front door panel (recessed) */
+        const door = new THREE.Mesh(
+          roundedBox(1.1, 0.95, 0.02, 0.03),
+          ribMat,
+        );
+        door.position.set(0, 0.6, 0.711);
+        cab.add(door);
+        /* Door handle */
+        const handle = new THREE.Mesh(
+          new THREE.BoxGeometry(0.05, 0.18, 0.04),
+          handleMat,
+        );
+        handle.position.set(0.42, 0.6, 0.74);
+        cab.add(handle);
+
+        /* Status LED strip across the door */
+        const led = new THREE.Mesh(
+          new THREE.BoxGeometry(0.85, 0.025, 0.012),
+          ledMat,
+        );
+        led.position.set(0, 0.95, 0.722);
+        cab.add(led);
+
+        /* Top ventilation grille — series of slim slots */
+        const ventCount = 7;
+        for (let v = 0; v < ventCount; v++) {
+          const vent = new THREE.Mesh(
+            new THREE.BoxGeometry(1.05, 0.025, 0.05),
+            ventMat,
+          );
+          vent.position.set(0, 1.215, -0.4 + (v / (ventCount - 1)) * 0.8);
+          cab.add(vent);
+        }
+
+        bessGroup.add(cab);
       }
+
+      /* Top-running bus-bar conduit linking the three cabinets */
+      const conduit = new THREE.Mesh(
+        new THREE.BoxGeometry(3.5, 0.12, 0.18),
+        conduitMat,
+      );
+      conduit.position.set(bx, padHeight + 1.32, bz - 0.6);
+      conduit.castShadow = true;
+      bessGroup.add(conduit);
+
+      worldGroup.add(bessGroup);
+
       labelTargets.push({
         x: bx, y: 2.4, z: bz,
         title: "BATTERY (UPS)",
@@ -1747,21 +2710,112 @@
       });
     }
 
-    /* Solar PV array — east of the yard */
+    /* Solar PV array — utility-scale ground-mount with proper detail
+     *
+     * Each row is built as a real PV array assembly:
+     *   - Tilted backsheet panel (deep blue, faintly metallic)
+     *   - Aluminium frame border around each module
+     *   - 6×10 cell grid lines etched into the surface
+     *   - Steel torque tube + post pile foundation
+     *   - Slight roughness variation to read as dust
+     */
     if (powerMix.solar > 0) {
       const px = yardX - sw(160);
       const pz = yardZ0 + sw(60);
-      const solarMat = new THREE.MeshStandardMaterial({
-        color: 0x122236, roughness: 0.2, metalness: 0.6,
-        emissive: 0x0a1622, emissiveIntensity: 0.5,
+
+      const cellMat = new THREE.MeshStandardMaterial({
+        color: 0x0e2748,
+        roughness: 0.18,
+        metalness: 0.65,
+        emissive: 0x0a1622, emissiveIntensity: 0.42,
+        roughnessMap: proceduralNoiseTexture({ size: 64, scale: 8, seed: 41 }),
       });
+      const frameMat = new THREE.MeshStandardMaterial({
+        color: 0xc0c8d0, roughness: 0.4, metalness: 0.85,
+      });
+      const cellLineMat = new THREE.MeshStandardMaterial({
+        color: 0x06101a, roughness: 0.95, metalness: 0,
+      });
+      const postMat = new THREE.MeshStandardMaterial({
+        color: 0x4d525a, roughness: 0.6, metalness: 0.5,
+      });
+      const torqueMat = new THREE.MeshStandardMaterial({
+        color: 0x383b40, roughness: 0.55, metalness: 0.6,
+      });
+
       const rowCount = Math.max(2, Math.round(powerMix.solar / 25) + 2);
+      const tilt = -0.5;
       for (let row = 0; row < rowCount; row++) {
-        const panel = new THREE.Mesh(new THREE.BoxGeometry(8, 0.1, 1.6), solarMat);
-        panel.rotation.x = -0.5;
-        panel.position.set(px, 1.0, pz - 4 + row * 2.4);
+        const rowGroup = new THREE.Group();
+        rowGroup.position.set(px, 1.0, pz - 4 + row * 2.4);
+        rowGroup.rotation.x = tilt;
+
+        /* Active cell layer (the dark blue PV face) */
+        const panel = new THREE.Mesh(
+          new THREE.BoxGeometry(8, 0.04, 1.6),
+          cellMat,
+        );
         panel.castShadow = true;
-        worldGroup.add(panel);
+        panel.receiveShadow = true;
+        rowGroup.add(panel);
+
+        /* Aluminium frame border (4 thin bars) */
+        const frameLong = new THREE.BoxGeometry(8.05, 0.06, 0.08);
+        const frameShort = new THREE.BoxGeometry(0.08, 0.06, 1.65);
+        const fl1 = new THREE.Mesh(frameLong, frameMat);
+        fl1.position.set(0, 0.005, 0.81);
+        rowGroup.add(fl1);
+        const fl2 = new THREE.Mesh(frameLong, frameMat);
+        fl2.position.set(0, 0.005, -0.81);
+        rowGroup.add(fl2);
+        const fs1 = new THREE.Mesh(frameShort, frameMat);
+        fs1.position.set(4.0, 0.005, 0);
+        rowGroup.add(fs1);
+        const fs2 = new THREE.Mesh(frameShort, frameMat);
+        fs2.position.set(-4.0, 0.005, 0);
+        rowGroup.add(fs2);
+
+        /* Cell grid lines — 9 vertical + 5 horizontal sub-divisions
+         * giving the impression of a 10×6 cell mosaic. Implemented as
+         * thin black bars sitting just above the panel surface. */
+        for (let v = 1; v < 10; v++) {
+          const line = new THREE.Mesh(
+            new THREE.BoxGeometry(0.012, 0.005, 1.55),
+            cellLineMat,
+          );
+          line.position.set(-4 + v * 0.8, 0.022, 0);
+          rowGroup.add(line);
+        }
+        for (let h = 1; h < 6; h++) {
+          const line = new THREE.Mesh(
+            new THREE.BoxGeometry(7.95, 0.005, 0.012),
+            cellLineMat,
+          );
+          line.position.set(0, 0.022, -0.8 + h * 0.27);
+          rowGroup.add(line);
+        }
+
+        worldGroup.add(rowGroup);
+
+        /* Torque tube running along the back of the row + ground
+         * posts every 2m. (These don't tilt with the panel.) */
+        const torque = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.06, 0.06, 8, 8),
+          torqueMat,
+        );
+        torque.rotation.z = Math.PI / 2;
+        torque.position.set(px, 0.85, pz - 4 + row * 2.4);
+        worldGroup.add(torque);
+
+        for (let p = 0; p < 5; p++) {
+          const post = new THREE.Mesh(
+            new THREE.BoxGeometry(0.1, 0.85, 0.12),
+            postMat,
+          );
+          post.position.set(px - 3.6 + p * 1.8, 0.425, pz - 4 + row * 2.4);
+          post.castShadow = true;
+          worldGroup.add(post);
+        }
       }
       labelTargets.push({
         x: px, y: 2.0, z: pz,
@@ -1870,18 +2924,134 @@
       });
     }
 
-    /* Fuel farm — only when gas is present */
+    /* Fuel farm — saddle-mounted horizontal diesel tanks
+     *
+     * Real DC fuel farms are usually horizontal cylindrical tanks
+     * mounted on concrete saddles inside a containment dyke. Each tank:
+     *   - Painted-steel cylinder (chamfered ends would need a Lathe;
+     *     keeping CylinderGeometry but with cap detail)
+     *   - Steel saddle bands at quarter-points
+     *   - Top-mounted vent stack and gauge cluster
+     *   - Climbing ladder along one side
+     *   - Containment dyke wall around the perimeter
+     */
     if (powerMix.gas > 0) {
       const fx = yardX + sw(20);
       const fz = yardZ0 + sw(80);
       addPad(fx, fz, 4, 4, 0x2a2218);
-      const tankMat = new THREE.MeshStandardMaterial({ color: 0x715a30, roughness: 0.5, metalness: 0.5 });
+
+      const tankMat = new THREE.MeshStandardMaterial({
+        color: 0x9d6f2f, // safety-orange diesel-tank colour
+        roughness: 0.55, metalness: 0.55,
+        roughnessMap: proceduralNoiseTexture({ size: 64, scale: 4, seed: 31 }),
+      });
+      const saddleMat = new THREE.MeshStandardMaterial({
+        color: 0x2a2f33, roughness: 0.6, metalness: 0.5,
+      });
+      const ventMat = new THREE.MeshStandardMaterial({
+        color: 0xb6bdc4, roughness: 0.4, metalness: 0.85,
+      });
+      const ladderMat = new THREE.MeshStandardMaterial({
+        color: 0x484c52, roughness: 0.5, metalness: 0.6,
+      });
+      const dykeMat = new THREE.MeshStandardMaterial({
+        color: 0x6e7178, roughness: 0.95, metalness: 0,
+      });
+
+      /* Containment dyke — low retaining wall around the pad */
+      const dyke = new THREE.Group();
+      const dykeH = 0.35;
+      const dykeT = 0.08;
+      const dykeW = 4.2;
+      const dykeD = 2.6;
+      const sides = [
+        { w: dykeW, d: dykeT, x: 0, z: -dykeD / 2 },
+        { w: dykeW, d: dykeT, x: 0, z: dykeD / 2 },
+        { w: dykeT, d: dykeD, x: -dykeW / 2, z: 0 },
+        { w: dykeT, d: dykeD, x: dykeW / 2, z: 0 },
+      ];
+      for (const s of sides) {
+        const wall = new THREE.Mesh(
+          new THREE.BoxGeometry(s.w, dykeH, s.d),
+          dykeMat,
+        );
+        wall.position.set(fx + s.x, padHeight + dykeH / 2, fz + s.z);
+        wall.receiveShadow = true;
+        dyke.add(wall);
+      }
+      worldGroup.add(dyke);
+
+      /* Two horizontal tanks on saddles */
       for (let i = 0; i < 2; i++) {
-        const tank = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.7, 1.6, 14), tankMat);
-        tank.position.set(fx - 0.9 + i * 1.8, padHeight + 0.8, fz);
+        const tx = fx - 0.9 + i * 1.8;
+        const ty = padHeight + 0.85;
+
+        const tank = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.55, 0.55, 1.7, 24),
+          tankMat,
+        );
+        tank.rotation.z = Math.PI / 2;
+        tank.position.set(tx, ty, fz);
         tank.castShadow = true;
         worldGroup.add(tank);
+
+        /* Steel saddle bands */
+        for (let s = 0; s < 2; s++) {
+          const band = new THREE.Mesh(
+            new THREE.TorusGeometry(0.57, 0.04, 8, 16),
+            saddleMat,
+          );
+          band.rotation.y = Math.PI / 2;
+          band.position.set(tx - 0.5 + s * 1.0, ty, fz);
+          worldGroup.add(band);
+          /* Saddle leg */
+          const leg = new THREE.Mesh(
+            new THREE.BoxGeometry(0.12, 0.45, 0.4),
+            saddleMat,
+          );
+          leg.position.set(tx - 0.5 + s * 1.0, padHeight + 0.225, fz);
+          worldGroup.add(leg);
+        }
+
+        /* Top vent stack */
+        const vent = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.04, 0.04, 0.45, 10),
+          ventMat,
+        );
+        vent.position.set(tx, ty + 0.75, fz);
+        worldGroup.add(vent);
+        const ventCap = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.08, 0.08, 0.04, 10),
+          ventMat,
+        );
+        ventCap.position.set(tx, ty + 1.0, fz);
+        worldGroup.add(ventCap);
+
+        /* Gauge cluster */
+        const gauge = new THREE.Mesh(
+          new THREE.BoxGeometry(0.18, 0.12, 0.08),
+          saddleMat,
+        );
+        gauge.position.set(tx, ty + 0.62, fz + 0.45);
+        worldGroup.add(gauge);
+
+        /* Climbing ladder rail (one side) */
+        const ladderRails = new THREE.Mesh(
+          new THREE.BoxGeometry(0.025, 0.02, 0.95),
+          ladderMat,
+        );
+        ladderRails.position.set(tx, ty + 0.55, fz - 0.6);
+        worldGroup.add(ladderRails);
+        for (let r = 0; r < 4; r++) {
+          const rung = new THREE.Mesh(
+            new THREE.BoxGeometry(0.18, 0.02, 0.025),
+            ladderMat,
+          );
+          rung.position.set(tx, ty + 0.2 + r * 0.18, fz - 0.6);
+          worldGroup.add(rung);
+        }
       }
+
       labelTargets.push({
         x: fx, y: 2.4, z: fz,
         title: "FUEL FARM",
@@ -2089,6 +3259,15 @@
        * filmed at. */
       if (windRotor) {
         windRotor.rotation.z = dt * 0.6;
+      }
+
+      /* Rooftop chiller fans — each rotor spins about its local Y
+       * axis at ~3.5 rad/s (real axial fluid-cooler fan speed at
+       * cruise) with a per-rotor offset so all units don't lockstep.
+       * Cheap loop; chillerFanRotors caps at 12 even on 6-fan units. */
+      for (let i = 0; i < chillerFanRotors.length; i++) {
+        const r = chillerFanRotors[i];
+        r.rotation.y = dt * 3.5 + (r.userData.spinOffset || 0);
       }
 
       /* Clouds drift along circular orbits around the scene's Y
