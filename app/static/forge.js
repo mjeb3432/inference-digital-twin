@@ -3143,6 +3143,11 @@
        * Phase 7 lights the DCIM telemetry, Phase 8 turns the
        * facility "live" with full lighting. */
       powerMix: { ...facilityState.power.sources },
+      /* UPS gating — BESS cabinets only render once the user has
+       * explicitly selected a UPS type (vrla / liion / supercap).
+       * Until then the power yard shows no battery line-up. */
+      upsType: facilityState.power.upsType || null,
+      redundancyTier: facilityState.power.redundancyTier || null,
       coolingType: facilityState.facility.coolingType || "air",
       targetMw: ui.derived.targetMw || facilityState.power.targetMW || 10,
       locationType: facilityState.site.locationType || "rural",
