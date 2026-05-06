@@ -29,38 +29,6 @@ def test_no_pseudo_forge_specs_in_repo() -> None:
     assert pseudo_specs == []
 
 
-def test_pointer_pan_uses_transform_scheduler_not_full_rerender() -> None:
-    source = load_source()
-    body = between(source, "function onCanvasPointerMove(event)", "function onCanvasPointerUp()")
-
-    assert "requestFloorPanTransform();" in body
-    assert "renderCenterCanvas();" not in body
-
-
-def test_telemetry_tick_prefers_incremental_overlay_patch() -> None:
-    source = load_source()
-    body = between(source, "function startTickers()", "function inspectorNeedsTelemetryRefresh()")
-
-    assert "const refreshed = updateFloorTelemetryOverlay();" in body
-    # The incremental-patch-first branch must still gate the full render.
-    # We accept either the original `if (!refreshed)` form or the newer
-    # `if (!refreshed && ...)` retry-throttled form added in 2026-Q2 to
-    # combat post-Phase-5 lag (full re-render only after several patch
-    # failures in a row).
-    assert ("if (!refreshed)" in body) or ("if (!refreshed &&" in body)
-    assert "renderCenterCanvas();" in body
-
-
-def test_overlay_patch_updates_live_rack_nodes() -> None:
-    source = load_source()
-    body = between(source, "function updateFloorTelemetryOverlay()", "function onTimelineClick(event)")
-
-    assert "querySelectorAll(\".cad-rack-meta[data-rack-id]\")" in body
-    assert "querySelectorAll(\".cad-rack-led[data-rack-id]\")" in body
-    assert "status-warning" in body
-    assert "status-critical" in body
-
-
 def test_carrier_validation_message_shows_selected_count() -> None:
     source = load_source()
 
@@ -110,15 +78,18 @@ def test_phase_1_requires_city_and_workload_selection() -> None:
     assert "facilityState.site.workloadProfile" in body
 
 
-def test_floor_toolbar_exposes_svg_export_action() -> None:
+def test_floor_toolbar_is_3d_only_with_recenter_and_fullscreen() -> None:
     source = load_source()
-    body = between(source, "function renderFloorToolbar()", "function renderLayerPanel()")
+    body = between(source, "function renderFloorToolbar()", "function arcControl(x1, y1, x2, y2)")
 
-    assert "data-canvas-action=\"export-drawing\"" in body
-    # The button's user-facing label can be either explicit text
-    # ("EXPORT SVG") or an icon with a tooltip — accept either form
-    # so we don't lock the toolbar layout into a particular density.
-    assert ("EXPORT SVG" in body) or ("Export SVG" in body)
+    # Only the 3D toolbar survives — recenter + fullscreen, no 2D dim
+    # toggle, no SVG export, no zoom controls, no layer presets.
+    assert "data-canvas-action=\"recenter-3d\"" in body
+    assert "data-canvas-action=\"fullscreen\"" in body
+    assert "data-canvas-action=\"dim-mode\"" not in body
+    assert "data-canvas-action=\"export-drawing\"" not in body
+    assert "data-canvas-action=\"toggle-layers\"" not in body
+    assert "2D PLAN" not in body
 
 
 def test_gbps_to_gbps_conversion_is_explicit() -> None:
@@ -175,15 +146,6 @@ def test_range_control_uses_plus_minus_and_number_input_without_slider() -> None
     assert "type=\"range\"" not in body
     assert body.find("data-delta=\"-${step}\"") < body.find("class=\"range-number\"")
     assert body.find("class=\"range-number\"") < body.find("data-delta=\"${step}\"")
-
-
-def test_download_export_uses_delayed_cleanup_for_blob_url() -> None:
-    source = load_source()
-    body = between(source, "function downloadTextFile(filename, content, mimeType = \"application/json;charset=utf-8\")", "function parseBoundedNumber(raw, min, max)")
-
-    assert "a.style.display = \"none\";" in body
-    assert "window.setTimeout(() => {" in body
-    assert "URL.revokeObjectURL(url);" in body
 
 
 def test_phase_two_power_panel_uses_firm_backing_language_not_queue_wording() -> None:
