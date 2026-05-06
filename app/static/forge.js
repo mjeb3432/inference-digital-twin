@@ -329,27 +329,15 @@
     FLOOR: "floor",
   });
 
+  /* Anchor frame used by computeFloorplan() to centre the site geometry
+   * in a known coordinate space. The Three.js mount in forge-3d.js
+   * consumes the resulting plan.site.x/y/w/h numbers and reprojects
+   * them into world coordinates, so the exact dimensions here only
+   * matter as a fixed reference frame — they no longer drive an SVG
+   * viewBox. */
   const FLOOR_VIEWBOX = Object.freeze({
     w: 1800,
     h: 1100,
-  });
-
-  const FLOOR_LAYERS = Object.freeze({
-    site: "SITE",
-    building: "BUILDING",
-    rooms: "ROOMS",
-    racks: "RACKS",
-    power: "POWER",
-    cooling: "COOLING",
-    annotations: "ANNOTATIONS",
-    overlay: "OVERLAY",
-  });
-
-  const SCALE_PRESETS = Object.freeze({
-    fit: 1,
-    "1:200": 0.85,
-    "1:100": 1.15,
-    "1:50": 1.8,
   });
 
   const SCHEMA_VERSION = "2.0.0";
@@ -511,10 +499,10 @@
     /* City combobox UI state — survives recalcAll/renderAll cycles
      * so the panel doesn't snap shut while the user types. */
     cityCombo: { open: false, search: "", focusIndex: 0 },
-    /* Three.js renderer handle when the 3D dimension mode is active.
+    /* Three.js renderer handle when the 3D scene is mounted.
      * Persisted on the ui object so the (singleton) WebGL context can
-     * be torn down cleanly when the user toggles back to 2D or
-     * navigates away from the floor view. */
+     * be torn down cleanly when the user navigates away from the
+     * floor view (e.g. switches to the global routing map at Phase 8). */
     forge3d: null,
     mapTicker: null,
     lastValidationSig: "",
@@ -524,40 +512,15 @@
     openHelpAnchorEl: null,
     layoutCache: { signature: "", value: null },
     leftRailWidth: LEFT_RAIL_WIDTH.default,
-    canvas: {
-      zoom: SCALE_PRESETS.fit,
-      panX: 0,
-      panY: 0,
-      panRaf: null,
-      dragging: false,
-      dragStartX: 0,
-      dragStartY: 0,
-      layerPanelOpen: false,
-      scalePreset: "fit",
-      /* "3d" (default) renders an orbit-camera Three.js scene of the
-       * full ground floor — building shell, data hall, mechanical,
-       * electrical, MMR, plus the outdoor power yard. "2d" toggles
-       * back to the legacy SVG CAD plan for users who prefer the
-       * blueprint view. The toggle is preserved across renders so
-       * flipping back to 2D and re-flipping to 3D doesn't reload
-       * Three.js (only the scene + DOM are rebuilt). */
-      dimensionMode: "3d",
-      layers: {
-        site: true,
-        building: true,
-        rooms: true,
-        racks: true,
-        power: true,
-        cooling: true,
-        annotations: true,
-        overlay: true,
-      },
-    },
+    /* The center canvas is now rendered exclusively as a Three.js
+     * orbit-camera 3D scene. The legacy 2D SVG blueprint and its
+     * pan/zoom/layer state were removed; OrbitControls owns all
+     * pointer/wheel input on the 3D host. */
+    canvas: {},
   };
 
   const $ = (id) => document.getElementById(id);
   const el = {};
-  const EMPTY_NETWORK_ROWS = Object.freeze({ paths: "", leafs: "", spine: "", mda: "", hdas: "", taps: "", zones: "" });
 
   const CURRENCY0 = new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
   const INTEGER = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
@@ -710,12 +673,7 @@
     el.viewToggleButton.addEventListener("click", onToggleView);
     el.fullScreenToggleButton.addEventListener("click", onToggleImmersive);
     el.constructionCanvas.addEventListener("click", onCanvasClick);
-    el.constructionCanvas.addEventListener("input", onCanvasControlInput);
-    el.constructionCanvas.addEventListener("wheel", onCanvasWheel, { passive: false });
-    el.constructionCanvas.addEventListener("pointerdown", onCanvasPointerDown);
     document.addEventListener("keydown", onGlobalKeydown);
-    window.addEventListener("pointermove", onCanvasPointerMove);
-    window.addEventListener("pointerup", onCanvasPointerUp);
     window.addEventListener("resize", onViewportResize);
     if (el.resetBuildButton) el.resetBuildButton.addEventListener("click", onResetBuild);
     el.helpPopoverLayer.addEventListener("click", onHelpLayerClick);
@@ -926,31 +884,11 @@
           updateMapOverlayValues();
         }
         if (facilityState.phase >= 5 && (facilityState.phase < 8 || ui.mode === VIEW_MODE.FLOOR)) {
-          /* In 3D mode the per-rack telemetry pulse is driven by the
-           * Three.js render loop directly (the scan plane + LED
-           * pulse). The 2D-SVG patcher always fails when the 3D
-           * canvas is mounted (no `.cad-rack-meta` nodes exist), so
-           * we just skip — calling renderCenterCanvas() here would
-           * tear down + re-mount the entire 3D scene, snapping the
-           * user's orbit-camera back to the default angle. That was
-           * being reported as "click resets to the beginning image". */
-          if (ui.canvas.dimensionMode === "3d") {
-            if (inspectorNeedsTelemetryRefresh()) renderInspector();
-            return;
-          }
-          const refreshed = updateFloorTelemetryOverlay();
-          if (!refreshed && !ui.continuousRenderPending) {
-            ui.telemetryRetryCount = (ui.telemetryRetryCount || 0) + 1;
-            if (ui.telemetryRetryCount > 4) {
-              ui.telemetryRetryCount = 0;
-              renderCenterCanvas();
-            }
-          } else {
-            ui.telemetryRetryCount = 0;
-          }
-          if (inspectorNeedsTelemetryRefresh()) {
-            renderInspector();
-          }
+          /* The per-rack telemetry pulse is driven by the Three.js
+           * render loop directly (scan plane + LED pulse). The
+           * inspector still needs a periodic refresh whenever the
+           * user is hovering a rack so its KW/°C readout updates. */
+          if (inspectorNeedsTelemetryRefresh()) renderInspector();
         }
       }
     }, 1400);
@@ -959,37 +897,6 @@
   function inspectorNeedsTelemetryRefresh() {
     const source = ui.hoverInspect || ui.selectedInspect;
     return !!(source && source.kind === "rack");
-  }
-
-  function updateFloorTelemetryOverlay() {
-    if (!(facilityState.phase >= 5 && (facilityState.phase < 8 || ui.mode === VIEW_MODE.FLOOR))) return false;
-    const svg = el.constructionCanvas.querySelector(".floor-svg-viewport");
-    if (!svg) return false;
-
-    const labels = svg.querySelectorAll(".cad-rack-meta[data-rack-id]");
-    const leds = svg.querySelectorAll(".cad-rack-led[data-rack-id]");
-    if (!labels.length && !leds.length) return false;
-
-    labels.forEach((node) => {
-      const idx = Number(node.dataset.rackId);
-      const rack = ui.rackCache[idx];
-      if (!rack) return;
-      const next = `${rack.powerKw.toFixed(1)} KW | ${rack.temp.toFixed(1)} C`;
-      if (node.textContent !== next) {
-        node.textContent = next;
-      }
-    });
-
-    leds.forEach((node) => {
-      const idx = Number(node.dataset.rackId);
-      const rack = ui.rackCache[idx];
-      if (!rack) return;
-      node.classList.toggle("status-healthy", rack.status === "healthy");
-      node.classList.toggle("status-warning", rack.status === "warning");
-      node.classList.toggle("status-critical", rack.status === "critical");
-    });
-
-    return true;
   }
 
   function onTimelineClick(event) {
@@ -1465,51 +1372,6 @@
     if (!actionNode || ui.mode !== VIEW_MODE.FLOOR) return;
 
     const action = actionNode.dataset.canvasAction;
-    if (action === "toggle-layers") {
-      ui.canvas.layerPanelOpen = !ui.canvas.layerPanelOpen;
-      renderCenterCanvas();
-      return;
-    }
-    if (action === "zoom-in") {
-      setCanvasZoom(ui.canvas.zoom * 1.15, "custom");
-      renderCenterCanvas();
-      return;
-    }
-    if (action === "zoom-out") {
-      setCanvasZoom(ui.canvas.zoom / 1.15, "custom");
-      renderCenterCanvas();
-      return;
-    }
-    if (action === "fit") {
-      ui.canvas.panX = 0;
-      ui.canvas.panY = 0;
-      setCanvasZoom(SCALE_PRESETS.fit, "fit");
-      renderCenterCanvas();
-      return;
-    }
-    if (action === "toggle-layer") {
-      const key = actionNode.dataset.layerKey;
-      if (key && Object.prototype.hasOwnProperty.call(ui.canvas.layers, key)) {
-        ui.canvas.layers[key] = !ui.canvas.layers[key];
-        renderCenterCanvas();
-      }
-      return;
-    }
-    if (action === "preset-view") {
-      applyCanvasLayerPreset(actionNode.dataset.presetKey);
-      renderCenterCanvas();
-      return;
-    }
-    if (action === "dim-mode") {
-      const want = actionNode.dataset.dim === "3d" ? "3d" : "2d";
-      if (ui.canvas.dimensionMode === want) return;
-      ui.canvas.dimensionMode = want;
-      /* Always tear down any existing 3D scene before re-rendering
-       * so the WebGL context isn't leaked. */
-      teardownForge3D();
-      renderCenterCanvas();
-      return;
-    }
     if (action === "recenter-3d") {
       /* Only meaningful when the 3D scene is mounted. */
       if (ui.forge3d && typeof ui.forge3d.recenter === "function") {
@@ -1521,123 +1383,6 @@
       onToggleImmersive();
       return;
     }
-    if (action === "export-drawing") {
-      exportActiveDrawing();
-      return;
-    }
-  }
-
-  function onCanvasControlInput(event) {
-    const target = event.target;
-    const action = target.dataset.canvasAction;
-    if (!action) return;
-
-    if (action === "scale-select") {
-      const val = target.value;
-      if (Object.prototype.hasOwnProperty.call(SCALE_PRESETS, val)) {
-        setCanvasZoom(SCALE_PRESETS[val], val);
-        if (val === "fit") {
-          ui.canvas.panX = 0;
-          ui.canvas.panY = 0;
-        }
-        renderCenterCanvas();
-      }
-    }
-  }
-
-  function onCanvasWheel(event) {
-    if (ui.mode !== VIEW_MODE.FLOOR) return;
-    /* In 3D mode let OrbitControls own the wheel so the camera can
-     * dolly without the SVG zoom fighting it. */
-    if (ui.canvas.dimensionMode === "3d") return;
-    const viewport = event.target.closest(".floor-svg-viewport");
-    if (!viewport) return;
-    event.preventDefault();
-
-    const factor = event.deltaY < 0 ? 1.08 : 0.92;
-    setCanvasZoom(ui.canvas.zoom * factor, "custom");
-    renderCenterCanvas();
-  }
-
-  function onCanvasPointerDown(event) {
-    if (ui.mode !== VIEW_MODE.FLOOR) return;
-    /* 3D mode: OrbitControls handles all pointer events on its own
-     * canvas — don't enable SVG-pan in parallel. */
-    if (ui.canvas.dimensionMode === "3d") return;
-    if (event.button !== 0) return;
-    if (event.target.closest(".floor-toolbar")) return;
-    if (!event.target.closest(".floor-svg-viewport")) return;
-
-    ui.canvas.dragging = true;
-    ui.canvas.dragStartX = event.clientX - ui.canvas.panX;
-    ui.canvas.dragStartY = event.clientY - ui.canvas.panY;
-    el.constructionCanvas.classList.add("is-panning");
-  }
-
-  function onCanvasPointerMove(event) {
-    if (!ui.canvas.dragging || ui.mode !== VIEW_MODE.FLOOR) return;
-    ui.canvas.panX = event.clientX - ui.canvas.dragStartX;
-    ui.canvas.panY = event.clientY - ui.canvas.dragStartY;
-    requestFloorPanTransform();
-  }
-
-  function onCanvasPointerUp() {
-    if (!ui.canvas.dragging) return;
-    ui.canvas.dragging = false;
-    el.constructionCanvas.classList.remove("is-panning");
-    if (ui.canvas.panRaf) {
-      cancelAnimationFrame(ui.canvas.panRaf);
-      ui.canvas.panRaf = null;
-      applyFloorPanZoomTransform();
-    }
-  }
-
-  function requestFloorPanTransform() {
-    if (ui.canvas.panRaf || ui.mode !== VIEW_MODE.FLOOR) return;
-    ui.canvas.panRaf = requestAnimationFrame(() => {
-      ui.canvas.panRaf = null;
-      applyFloorPanZoomTransform();
-    });
-  }
-
-  function applyFloorPanZoomTransform() {
-    const panZoom = el.constructionCanvas.querySelector("#floor-pan-zoom");
-    if (!panZoom) return false;
-    panZoom.setAttribute("transform", `translate(${ui.canvas.panX.toFixed(2)} ${ui.canvas.panY.toFixed(2)}) scale(${ui.canvas.zoom.toFixed(4)})`);
-    return true;
-  }
-
-  function setCanvasZoom(value, preset = "custom") {
-    ui.canvas.zoom = clamp(value, 0.45, 4.25);
-    ui.canvas.scalePreset = preset;
-  }
-
-  function applyCanvasLayerPreset(key) {
-    const base = {
-      site: true,
-      building: true,
-      rooms: true,
-      racks: true,
-      power: true,
-      cooling: true,
-      annotations: true,
-      overlay: true,
-    };
-    if (key === "site") {
-      base.racks = false;
-      base.cooling = false;
-    } else if (key === "electrical") {
-      base.rooms = false;
-      base.cooling = false;
-      base.racks = false;
-    } else if (key === "cooling") {
-      base.power = false;
-      base.racks = false;
-    } else if (key === "network") {
-      base.power = false;
-      base.cooling = false;
-    }
-    ui.canvas.layers = base;
   }
 
   function onInspectHover(event) {
@@ -3335,15 +3080,9 @@
       teardownForge3D();
     } else {
       el.constructionCanvas.innerHTML = renderFloorView(animate);
-    }
-
-    /* Mount or unmount the 3D scene depending on the current view+mode.
-     * The string-based renderFloorView leaves a #forge3dHost element
-     * behind when 3D is active; we attach Three.js to it here. */
-    if (!mapMode && ui.canvas.dimensionMode === "3d") {
+      /* Mount the 3D scene into the host element renderFloorView
+       * just inserted into the DOM. */
       ensureForge3DMount();
-    } else {
-      teardownForge3D();
     }
 
     setupTravelAnimations(mapMode ? VIEW_MODE.MAP : VIEW_MODE.FLOOR);
@@ -3382,7 +3121,7 @@
     }
 
     const phase = facilityState.phase;
-    const { plan, racks, networkRows } = deriveFloorLayout(phase);
+    const { plan, racks } = deriveFloorLayout(phase);
 
     /* Mark the host as pending so we don't double-mount on a quick
      * re-render. */
@@ -3393,7 +3132,6 @@
       container: host,
       plan,
       racks,
-      networkRows,
       phase,
       /* Pass every decision the user has locked in. The 3D scene
        * uses these to gate equipment progressively across Phases
@@ -3432,12 +3170,9 @@
       host.dataset.mounting = "";
       const loading = document.getElementById("forge3dLoading");
       if (loading) {
-        loading.textContent = "3D RENDERER FAILED — FALLING BACK TO 2D";
+        loading.textContent = "3D RENDERER UNAVAILABLE — RELOAD TO RETRY";
         loading.classList.add("forge-3d-error");
       }
-      /* Fall back to 2D so the user isn't stranded on a blank scene. */
-      ui.canvas.dimensionMode = "2d";
-      setTimeout(() => renderCenterCanvas(), 1200);
     });
   }
 
@@ -3479,8 +3214,7 @@
       locationType: facilityState.site.locationType,
     });
     const racks = buildRackRects(plan.rooms.dataHall, facilityState.compute.rackCount || 0, { dense: denseRackLayout });
-    const networkRows = phase >= 6 ? rackRowPaths(plan.rooms.dataHall, racks) : EMPTY_NETWORK_ROWS;
-    const value = { plan, racks, networkRows };
+    const value = { plan, racks };
 
     ui.layoutCache.signature = signature;
     ui.layoutCache.value = value;
@@ -3488,50 +3222,26 @@
   }
 
   function renderFloorView(withTransition) {
-    const phase = facilityState.phase;
-    const { plan, racks, networkRows } = deriveFloorLayout(phase);
-    const zoom = ui.canvas.zoom;
     const stageClass = withTransition ? "floor-stage" : "";
-    const is3d = ui.canvas.dimensionMode === "3d";
-
-    if (is3d) {
-      /* The 3D scene is mounted imperatively after this string is
-       * inserted into the DOM (see renderCenterCanvas → ensureForge3DMount).
-       * We just emit a host container with a loading hint. */
-      return `
-        <div class="canvas-shell floor-cad floor-cad-3d ${stageClass}">
-          ${renderFloorToolbar()}
-          ${renderPhaseBriefOverlay()}
-          ${renderTutorialRestoreChip()}
-          <div id="forge3dHost" class="forge-3d-host" role="img" aria-label="3D facility view">
-            <div class="forge-3d-loading" id="forge3dLoading">LOADING 3D RENDERER…</div>
-          </div>
-          <div class="forge-3d-hint">DRAG TO ORBIT · SCROLL TO ZOOM · CLICK 2D TO SEE BLUEPRINT</div>
-          <div class="forge-3d-legend" aria-hidden="true">
-            <div class="forge-3d-legend-item forge-3d-legend-compute"><span class="forge-3d-legend-dot"></span>COMPUTE</div>
-            <div class="forge-3d-legend-item forge-3d-legend-energy"><span class="forge-3d-legend-dot"></span>ENERGY</div>
-            <div class="forge-3d-legend-item forge-3d-legend-cooling"><span class="forge-3d-legend-dot"></span>COOLING</div>
-            <div class="forge-3d-legend-item forge-3d-legend-network"><span class="forge-3d-legend-dot"></span>NETWORK</div>
-          </div>
-        </div>
-      `;
-    }
-
+    /* The center canvas is the 3D scene exclusively. The plan/racks
+     * data structures are still computed (deriveFloorLayout), but they
+     * are consumed by the Three.js mount in ensureForge3DMount(), not
+     * by an SVG renderer here. */
     return `
-      <div class="canvas-shell floor-cad ${stageClass}">
+      <div class="canvas-shell floor-cad-3d ${stageClass}">
         ${renderFloorToolbar()}
-        ${renderLayerPanel()}
         ${renderPhaseBriefOverlay()}
         ${renderTutorialRestoreChip()}
-        <svg id="forge-canvas" class="floor-svg-viewport" viewBox="0 0 ${FLOOR_VIEWBOX.w} ${FLOOR_VIEWBOX.h}" role="img" aria-label="Architectural floor plan">
-          <defs>${renderCadDefs()}</defs>
-          <rect class="cad-bg" x="0" y="0" width="${FLOOR_VIEWBOX.w}" height="${FLOOR_VIEWBOX.h}"></rect>
-          <g id="floor-pan-zoom" transform="translate(${ui.canvas.panX.toFixed(2)} ${ui.canvas.panY.toFixed(2)}) scale(${zoom.toFixed(4)})">
-            ${renderCadLayers(plan, racks, networkRows, phase, withTransition)}
-          </g>
-          ${renderCadFixedOverlay(plan)}
-          <g id="travelDots"></g>
-        </svg>
+        <div id="forge3dHost" class="forge-3d-host" role="img" aria-label="3D facility view">
+          <div class="forge-3d-loading" id="forge3dLoading">LOADING 3D RENDERER…</div>
+        </div>
+        <div class="forge-3d-hint">DRAG TO ORBIT · SCROLL TO ZOOM</div>
+        <div class="forge-3d-legend" aria-hidden="true">
+          <div class="forge-3d-legend-item forge-3d-legend-compute"><span class="forge-3d-legend-dot"></span>COMPUTE</div>
+          <div class="forge-3d-legend-item forge-3d-legend-energy"><span class="forge-3d-legend-dot"></span>ENERGY</div>
+          <div class="forge-3d-legend-item forge-3d-legend-cooling"><span class="forge-3d-legend-dot"></span>COOLING</div>
+          <div class="forge-3d-legend-item forge-3d-legend-network"><span class="forge-3d-legend-dot"></span>NETWORK</div>
+        </div>
       </div>
     `;
   }
@@ -3817,502 +3527,20 @@
     return { slots, aisles, rowLabels, installed, capacity, manifolds, trays, pdus, clusters, rowCount };
   }
 
-  function rackRowPaths(dataHall, rackLayout) {
-    if (!rackLayout.slots.length) return EMPTY_NETWORK_ROWS;
-
-    const mda = {
-      x: dataHall.x + 14,
-      y: dataHall.y + 10,
-      w: 92,
-      h: 34,
-    };
-    const spineY = mda.y + mda.h + 8;
-    const spine = `<rect class="cad-network-spine" x="${dataHall.x + dataHall.w * 0.16}" y="${spineY}" width="${dataHall.w * 0.68}" height="8"></rect>`;
-    const mdaNode = `<g data-inspect-kind="fabric" data-inspect-key="spine"><rect class="cad-network-mda" x="${mda.x}" y="${mda.y}" width="${mda.w}" height="${mda.h}"></rect><text class="cad-small" x="${mda.x + mda.w / 2}" y="${mda.y + mda.h / 2 + 3}" text-anchor="middle">MDA</text></g>`;
-
-    const hdas = [];
-    const taps = [];
-    const zones = [];
-    const leafs = [];
-    const paths = [];
-    const hdaWidth = 52;
-    const hdaHeight = 20;
-
-    rackLayout.clusters.forEach((cluster, idx) => {
-      const ratio = (idx + 1) / (rackLayout.clusters.length + 1);
-      const hdaX = dataHall.x + dataHall.w * ratio - hdaWidth / 2;
-      const hdaY = dataHall.y + 14;
-      const hdaCx = hdaX + hdaWidth / 2;
-      const hdaCy = hdaY + hdaHeight / 2;
-
-      hdas.push(`<g data-inspect-kind="fabric" data-inspect-key="hda"><rect class="cad-network-hda" x="${hdaX}" y="${hdaY}" width="${hdaWidth}" height="${hdaHeight}"></rect><text class="cad-small" x="${hdaCx}" y="${hdaCy + 3}" text-anchor="middle">HDA-${idx + 1}</text></g>`);
-      taps.push(`<circle class="cad-network-tap" cx="${hdaX + hdaWidth + 8}" cy="${hdaCy}" r="2.4"></circle>`);
-      zones.push(`<rect class="cad-network-zone" x="${hdaX - 22}" y="${dataHall.y + 50}" width="${hdaWidth + 44}" height="${dataHall.h - 58}"></rect>`);
-      leafs.push(`<rect class="cad-network-leaf" x="${hdaX - 10}" y="${hdaY + hdaHeight + 6}" width="8" height="5"></rect><rect class="cad-network-leaf" x="${hdaX + hdaWidth + 2}" y="${hdaY + hdaHeight + 6}" width="8" height="5"></rect>`);
-      paths.push(`<path id="hda-${idx}" class="cad-network-path net-path" d="M${mda.x + mda.w} ${spineY + 4}H${hdaCx}V${hdaY}" data-speed="${0.05 + idx * 0.0016}" data-inspect-kind="fabric" data-inspect-key="cabling"></path>`);
-
-      for (let row = cluster.start; row <= cluster.end; row += 1) {
-        const rowMeta = rackLayout.rowLabels[row];
-        if (!rowMeta) continue;
-        const y = rowMeta.cy;
-        paths.push(`<path id="net-${idx}-${row}" class="cad-network-path net-path" d="M${hdaCx} ${hdaY + hdaHeight}V${y}H${dataHall.x + 2}M${hdaCx} ${hdaY + hdaHeight}V${y}H${dataHall.x + dataHall.w - 2}" data-speed="${0.053 + row * 0.0011}" data-inspect-kind="fabric" data-inspect-key="cabling"></path>`);
-      }
-    });
-
-    return {
-      paths: paths.join(""),
-      spine,
-      mda: mdaNode,
-      hdas: hdas.join(""),
-      taps: taps.join(""),
-      zones: zones.join(""),
-      leafs: leafs.join(""),
-    };
-  }
-
   function renderFloorToolbar() {
-    const scalePreset = Object.prototype.hasOwnProperty.call(SCALE_PRESETS, ui.canvas.scalePreset) ? ui.canvas.scalePreset : "fit";
-    const is3d = ui.canvas.dimensionMode === "3d";
-
-    /* In 3D mode the SVG-specific tools (zoom controls, scale select,
-     * SVG export, layer presets) are irrelevant — they just clutter
-     * the toolbar and force it to wrap to a second row that lands on
-     * top of the SHOW TUTORIAL chip. So the 3D toolbar is intentionally
-     * minimal: dim toggle + recenter + fullscreen. The 2D toolbar
-     * keeps the full blueprint controls. */
-    if (is3d) {
-      return `
-        <div class="floor-toolbar floor-toolbar-3d">
-          <div class="floor-toolbar-group">
-            <div class="floor-dim-segment" role="tablist" aria-label="View mode">
-              <button class="ghost-button floor-btn ${!is3d ? "active" : ""}" type="button" role="tab" aria-selected="${!is3d}" data-canvas-action="dim-mode" data-dim="2d">2D PLAN</button>
-              <button class="ghost-button floor-btn ${is3d ? "active" : ""}" type="button" role="tab" aria-selected="${is3d}" data-canvas-action="dim-mode" data-dim="3d">3D MODEL</button>
-            </div>
-          </div>
-          <div class="floor-toolbar-group">
-            <button class="ghost-button floor-btn" type="button" data-canvas-action="recenter-3d" title="Reset camera">⟲ RECENTER</button>
-            <button class="ghost-button floor-btn" type="button" data-canvas-action="fullscreen" title="Fullscreen">⤢ FULLSCREEN</button>
-          </div>
-        </div>
-      `;
-    }
-
-    /* 2D blueprint toolbar — keeps the full architectural controls. */
+    /* The center canvas is always a Three.js scene now, so the
+     * toolbar only exposes camera-recenter and fullscreen. The
+     * legacy 2D dim-toggle, layer presets, scale select, and SVG
+     * export controls were removed when the SVG blueprint was
+     * deleted. */
     return `
-      <div class="floor-toolbar floor-toolbar-2d">
+      <div class="floor-toolbar floor-toolbar-3d">
         <div class="floor-toolbar-group">
-          <button class="ghost-button floor-btn" type="button" data-canvas-action="toggle-layers">☰ LAYERS ▾</button>
-          <button class="ghost-button floor-btn" type="button" data-canvas-action="preset-view" data-preset-key="site">SITE</button>
-          <button class="ghost-button floor-btn" type="button" data-canvas-action="preset-view" data-preset-key="electrical">ELEC</button>
-          <button class="ghost-button floor-btn" type="button" data-canvas-action="preset-view" data-preset-key="cooling">COOL</button>
-          <button class="ghost-button floor-btn" type="button" data-canvas-action="preset-view" data-preset-key="network">NET</button>
-        </div>
-        <div class="floor-toolbar-group">
-          <button class="ghost-button floor-btn floor-zoom" type="button" data-canvas-action="zoom-out">−</button>
-          <select class="floor-scale-select" data-canvas-action="scale-select">
-            <option value="1:50" ${scalePreset === "1:50" ? "selected" : ""}>1:50</option>
-            <option value="1:100" ${scalePreset === "1:100" ? "selected" : ""}>1:100</option>
-            <option value="1:200" ${scalePreset === "1:200" ? "selected" : ""}>1:200</option>
-            <option value="fit" ${scalePreset === "fit" ? "selected" : ""}>FIT</option>
-          </select>
-          <button class="ghost-button floor-btn floor-zoom" type="button" data-canvas-action="zoom-in">+</button>
-        </div>
-        <div class="floor-toolbar-group">
-          <div class="floor-dim-segment" role="tablist" aria-label="View mode">
-            <button class="ghost-button floor-btn ${!is3d ? "active" : ""}" type="button" role="tab" aria-selected="${!is3d}" data-canvas-action="dim-mode" data-dim="2d">2D</button>
-            <button class="ghost-button floor-btn ${is3d ? "active" : ""}" type="button" role="tab" aria-selected="${is3d}" data-canvas-action="dim-mode" data-dim="3d">3D</button>
-          </div>
-          <button class="ghost-button floor-btn" type="button" data-canvas-action="fullscreen" title="Fullscreen">⤢</button>
-          <button class="ghost-button floor-btn" type="button" data-canvas-action="export-drawing" title="Export SVG">↓</button>
+          <button class="ghost-button floor-btn" type="button" data-canvas-action="recenter-3d" title="Reset camera">⟲ RECENTER</button>
+          <button class="ghost-button floor-btn" type="button" data-canvas-action="fullscreen" title="Fullscreen">⤢ FULLSCREEN</button>
         </div>
       </div>
     `;
-  }
-
-  function renderLayerPanel() {
-    const cls = ui.canvas.layerPanelOpen ? "open" : "";
-    return `<div class="floor-layer-panel ${cls}">
-      ${Object.entries(FLOOR_LAYERS).map(([key, label]) => `<button type="button" class="floor-layer-toggle ${ui.canvas.layers[key] ? "on" : ""}" data-canvas-action="toggle-layer" data-layer-key="${key}">${label}</button>`).join("")}
-    </div>`;
-  }
-
-  function renderCadDefs() {
-    return `
-      <pattern id="cad-dots" width="12" height="12" patternUnits="userSpaceOnUse">
-        <rect width="12" height="12" fill="#f8f8f6"></rect>
-        <circle cx="2" cy="2" r="0.7" fill="#d6d6d2"></circle>
-      </pattern>
-      <pattern id="cad-hatch-mech" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-        <line x1="0" y1="0" x2="0" y2="8" stroke="#c7ccd1" stroke-width="1"></line>
-      </pattern>
-      <pattern id="cad-hatch-elec" width="8" height="8" patternUnits="userSpaceOnUse">
-        <path d="M0 0L8 8M8 0L0 8" stroke="#cdc6d8" stroke-width="0.8"></path>
-      </pattern>
-      <pattern id="cad-grass" width="10" height="10" patternUnits="userSpaceOnUse">
-        <rect width="10" height="10" fill="#1a2c25"></rect>
-        <circle cx="2" cy="4" r="0.8" fill="#294938"></circle>
-        <circle cx="7" cy="7" r="0.7" fill="#355843"></circle>
-      </pattern>
-      <filter id="cad-concrete-noise" x="-20%" y="-20%" width="140%" height="140%">
-        <feTurbulence baseFrequency="0.9" numOctaves="2" type="fractalNoise" stitchTiles="stitch"></feTurbulence>
-        <feColorMatrix type="saturate" values="0"></feColorMatrix>
-        <feComponentTransfer><feFuncA type="table" tableValues="0 0.12"></feFuncA></feComponentTransfer>
-      </filter>
-      <marker id="cad-arrow" markerWidth="6" markerHeight="6" refX="4.5" refY="3" orient="auto">
-        <path d="M0 0L6 3L0 6Z" fill="#555555"></path>
-      </marker>
-    `;
-  }
-
-  function layerStyle(key) {
-    return ui.canvas.layers[key] ? "" : "display:none;";
-  }
-
-  function renderSiteContext(plan, locationType, withTransition) {
-    const drawStroke = withTransition ? "draw-stroke" : "";
-    const drawFill = withTransition ? "draw-fill" : "";
-    const drawLabel = withTransition ? "draw-label" : "";
-
-    if (locationType === "urban") {
-      return `
-        <rect class="cad-adjacent ${drawFill}" x="${plan.site.x - 140}" y="${plan.site.y + 24}" width="94" height="120"></rect>
-        <rect class="cad-adjacent ${drawFill}" x="${plan.site.x - 152}" y="${plan.site.y + 174}" width="106" height="164"></rect>
-        <rect class="cad-adjacent ${drawFill}" x="${plan.site.x + plan.site.w + 48}" y="${plan.site.y + 48}" width="96" height="140"></rect>
-        <rect class="cad-adjacent ${drawFill}" x="${plan.site.x + plan.site.w + 54}" y="${plan.site.y + 220}" width="104" height="176"></rect>
-        <path class="cad-street-grid ${drawStroke}" d="M${plan.site.x - 170} ${plan.site.y - 10}V${plan.site.y + plan.site.h + 20}M${plan.site.x + plan.site.w + 180} ${plan.site.y - 10}V${plan.site.y + plan.site.h + 20}"></path>
-      `;
-    }
-    if (locationType === "repurpose") {
-      return `
-        <rect class="cad-existing-shell ${drawFill}" x="${plan.site.x + 96}" y="${plan.site.y + 90}" width="${plan.site.w - 192}" height="${plan.site.h - 196}"></rect>
-        <text class="cad-room-label ${drawLabel}" x="${plan.site.x + plan.site.w / 2}" y="${plan.site.y + plan.site.h / 2}" text-anchor="middle">DEMO SCOPE</text>
-      `;
-    }
-    if (locationType === "campus") {
-      return `
-        <path class="cad-campus-road ${drawStroke}" d="M${plan.site.x - 170} ${plan.site.y + 80}H${plan.site.x + plan.site.w + 170}"></path>
-        <path class="cad-campus-road ${drawStroke}" d="M${plan.site.x - 170} ${plan.site.y + plan.site.h - 100}H${plan.site.x + plan.site.w + 170}"></path>
-        <path class="cad-easement ${drawStroke}" d="M${plan.site.x + 40} ${plan.site.y + 40}L${plan.site.x + plan.site.w - 40} ${plan.site.y + plan.site.h - 40}"></path>
-        <path class="cad-easement ${drawStroke}" d="M${plan.site.x + 40} ${plan.site.y + plan.site.h - 40}L${plan.site.x + plan.site.w - 40} ${plan.site.y + 40}"></path>
-        <text class="cad-small ${drawLabel}" x="${plan.site.x + plan.site.w - 172}" y="${plan.site.y + 56}">UTILITY EASEMENT</text>
-      `;
-    }
-    return `
-      ${Array.from({ length: 8 }, (_, idx) => {
-        const y = plan.site.y + 24 + idx * ((plan.site.h - 48) / 7);
-        const amp = 8 + (idx % 3) * 3;
-        return `<path class="cad-contour ${drawStroke}" d="M${plan.site.x + 14} ${y}C${plan.site.x + plan.site.w * 0.3} ${y - amp}, ${plan.site.x + plan.site.w * 0.7} ${y + amp}, ${plan.site.x + plan.site.w - 12} ${y - amp * 0.4}"></path>`;
-      }).join("")}
-      ${Array.from({ length: 10 }, (_, idx) => {
-        const x = plan.site.x + 38 + (idx % 5) * 16;
-        const y = plan.site.y + plan.site.h - 120 + Math.floor(idx / 5) * 20;
-        return `<circle class="cad-tree" cx="${x}" cy="${y}" r="5"></circle>`;
-      }).join("")}
-    `;
-  }
-
-  function inspectZone(kind) {
-    if (["location", "permit", "acreage"].includes(kind)) return "site";
-    if (["target-mw", "tier", "ups", "power-source", "power-substation", "arch"].includes(kind)) return "power";
-    if (["fiber-access", "carrier", "ixp", "pop"].includes(kind)) return "fiber";
-    if (["developer", "facility"].includes(kind)) return "building";
-    if (["cooling", "telemetry"].includes(kind)) return "cooling";
-    if (["gpu", "gpr", "stack", "serving", "rack"].includes(kind)) return "racks";
-    if (["intra-node", "fabric", "external"].includes(kind)) return "network";
-    if (["monitoring", "maintenance"].includes(kind)) return "overlay";
-    return null;
-  }
-
-  function renderSelectionHighlight(plan) {
-    const inspect = ui.hoverInspect || ui.selectedInspect;
-    if (!inspect) return "";
-    const zone = inspectZone(inspect.kind);
-    if (!zone) return "";
-    const zones = {
-      site: plan.site,
-      building: plan.building,
-      racks: plan.rooms.dataHall,
-      cooling: plan.rooms.mechanical,
-      network: plan.rooms.dataHall,
-      overlay: plan.site,
-      power: { x: plan.site.x + plan.site.w - 270, y: plan.site.y + plan.site.h - 220, w: 250, h: 180 },
-      fiber: { x: plan.site.x + plan.site.w - 220, y: plan.site.y - 26, w: 210, h: 160 },
-    };
-    const rect = zones[zone];
-    if (!rect) return "";
-    return `<rect class="cad-selection-highlight" x="${rect.x}" y="${rect.y}" width="${rect.w}" height="${rect.h}"></rect>`;
-  }
-
-  function renderCadLayers(plan, racks, networkRows, phase, withTransition) {
-    const showSite = phase >= 1;
-    const showPower = phase >= 2;
-    const showFiber = phase >= 3;
-    const showFacility = phase >= 4;
-    const showCompute = phase >= 5;
-    const showNetwork = phase >= 6;
-    const showDcim = phase >= 7;
-    const complete = phase >= 8;
-    const drawStroke = withTransition ? "draw-stroke" : "";
-    const drawFill = withTransition ? "draw-fill" : "";
-    const drawLabel = withTransition ? "draw-label" : "";
-    const rackLabelOpacity = clamp((ui.canvas.zoom - 0.72) / 0.58, 0, 1);
-    const locationType = facilityState.site.locationType || "rural";
-    const denseCooling = ["d2c", "immersion"].includes(facilityState.facility.coolingType);
-    const utilityLabelMw = Math.max(1, Math.round(ui.derived.targetMw || facilityState.power.targetMW || 10));
-    const fiberStrands = Math.max(24, facilityState.fiber.carriers.length * 24);
-    const carrierLabel = facilityState.fiber.carriers.map((key) => CARRIER[key]?.label || key).join(" / ") || "UNASSIGNED";
-
-    const utilitySecondary = facilityState.power.sources.fom < 80 && (facilityState.power.sources.gas > 0 || facilityState.power.sources.solar > 0 || facilityState.power.sources.wind > 0);
-    const utilityEntries = utilitySecondary
-      ? [{ x: plan.site.x + 20, y: plan.site.y + plan.site.h * 0.52 }, { x: plan.site.x + plan.site.w - 20, y: plan.site.y + plan.site.h * 0.46 }]
-      : [{ x: plan.site.x + 20, y: plan.site.y + plan.site.h * 0.52 }];
-
-    const powerPads = Array.from({ length: Math.max(0, Math.ceil((ui.derived.targetMw || 0) * ((facilityState.power.sources.gas || 0) / 100) / 20)) }, (_, i) => {
-      const row = Math.floor(i / 4);
-      const col = i % 4;
-      const x = plan.site.x + plan.site.w - 220 + col * 48;
-      const y = plan.site.y + plan.site.h - 170 + row * 32;
-      return `<g data-inspect-kind="power-source" data-inspect-key="gas"><rect class="cad-concrete-pad ${drawFill}" x="${x}" y="${y}" width="40" height="24"></rect><text class="cad-small ${drawLabel}" x="${x + 20}" y="${y + 15}" text-anchor="middle">GEN-${i + 1}</text></g>`;
-    }).join("");
-
-    const solarArrayCount = Math.max(0, Math.ceil((facilityState.power.sources.solar || 0) / 15));
-    const solarArrays = Array.from({ length: solarArrayCount }, (_, i) => {
-      const row = Math.floor(i / 3);
-      const col = i % 3;
-      const x = plan.site.x + 36 + col * 72;
-      const y = plan.site.y + plan.site.h - 96 + row * 24;
-      return `<g data-inspect-kind="power-source" data-inspect-key="solar">
-        <rect class="cad-solar-pad ${drawFill}" x="${x}" y="${y}" width="56" height="14" rx="2"></rect>
-        <line class="cad-solar-frame ${drawStroke}" x1="${x + 8}" y1="${y + 3}" x2="${x + 48}" y2="${y + 3}"></line>
-        <line class="cad-solar-frame ${drawStroke}" x1="${x + 6}" y1="${y + 7}" x2="${x + 50}" y2="${y + 7}"></line>
-        <line class="cad-solar-frame ${drawStroke}" x1="${x + 4}" y1="${y + 11}" x2="${x + 52}" y2="${y + 11}"></line>
-      </g>`;
-    }).join("");
-
-    const windPpa = showPower && facilityState.power.sources.wind > 0 ? `
-      <g data-inspect-kind="power-source" data-inspect-key="wind">
-        <path class="cad-wind-ppa ${drawStroke}" d="M${plan.site.x + plan.site.w + 20} ${plan.site.y + 42}H${plan.site.x + plan.site.w + 90}"></path>
-        <line class="cad-wind-mast ${drawStroke}" x1="${plan.site.x + plan.site.w + 112}" y1="${plan.site.y + 72}" x2="${plan.site.x + plan.site.w + 112}" y2="${plan.site.y + 30}"></line>
-        <circle class="cad-wind-hub ${drawFill}" cx="${plan.site.x + plan.site.w + 112}" cy="${plan.site.y + 28}" r="4"></circle>
-        <line class="cad-wind-blade ${drawStroke}" x1="${plan.site.x + plan.site.w + 112}" y1="${plan.site.y + 28}" x2="${plan.site.x + plan.site.w + 132}" y2="${plan.site.y + 22}"></line>
-        <line class="cad-wind-blade ${drawStroke}" x1="${plan.site.x + plan.site.w + 112}" y1="${plan.site.y + 28}" x2="${plan.site.x + plan.site.w + 98}" y2="${plan.site.y + 10}"></line>
-        <line class="cad-wind-blade ${drawStroke}" x1="${plan.site.x + plan.site.w + 112}" y1="${plan.site.y + 28}" x2="${plan.site.x + plan.site.w + 102}" y2="${plan.site.y + 48}"></line>
-        <text class="cad-small ${drawLabel}" x="${plan.site.x + plan.site.w + 22}" y="${plan.site.y + 34}">OFFSITE WIND PPA</text>
-      </g>
-    ` : "";
-
-    const smrBlock = showPower && facilityState.power.sources.smr > 0 ? `
-      <g data-inspect-kind="power-source" data-inspect-key="smr">
-        <rect class="cad-reactor-shell ${drawFill}" x="${plan.site.x + plan.site.w - 118}" y="${plan.site.y + 34}" width="74" height="42" rx="4"></rect>
-        <rect class="cad-reactor-stack ${drawFill}" x="${plan.site.x + plan.site.w - 82}" y="${plan.site.y + 18}" width="14" height="16" rx="2"></rect>
-        <text class="cad-small ${drawLabel}" x="${plan.site.x + plan.site.w - 112}" y="${plan.site.y + 28}">SMR YARD</text>
-      </g>
-    ` : "";
-
-    const rackNodes = showCompute ? racks.slots.map((slot, idx) => {
-      const installed = idx < racks.installed;
-      const telemetry = ui.rackCache[idx];
-      const power = telemetry ? telemetry.powerKw.toFixed(1) : "--";
-      const temp = telemetry ? telemetry.temp.toFixed(1) : "--";
-      const statusClass = telemetry ? `status-${telemetry.status}` : "";
-      return `<g data-inspect-kind="rack" data-inspect-key="${idx + 1}">
-        <rect class="cad-rack-slot ${installed ? "installed" : "empty"}" style="${installed ? `animation-delay:${idx * 20}ms;` : ""}" x="${slot.x}" y="${slot.y}" width="${slot.w}" height="${slot.h}"></rect>
-        ${installed ? `<rect class="cad-rack-led ${GPU[facilityState.compute.gpuModel || "h100"]?.series || "H"} ${showDcim ? "live" : ""} ${statusClass}" data-rack-id="${idx}" x="${slot.x + slot.w * 0.08}" y="${slot.y + 0.5}" width="${Math.max(1, slot.w * 0.12)}" height="${slot.h - 1}"></rect>` : ""}
-        ${showDcim && installed ? `<circle class="cad-sensor" cx="${slot.x + slot.w * 0.78}" cy="${slot.y + slot.h * 0.28}" r="${Math.max(0.9, slot.w * 0.12)}"></circle>` : ""}
-        ${installed ? `<text class="cad-rack-meta ${drawLabel}" data-rack-id="${idx}" style="opacity:${rackLabelOpacity};" x="${slot.x + slot.w / 2}" y="${slot.y + slot.h + 7}" text-anchor="middle">${power} KW | ${temp} C</text>` : ""}
-      </g>`;
-    }).join("") : "";
-
-    const metadata = complete ? `<g class="${drawLabel}">
-      <rect class="cad-metadata-bg" x="${FLOOR_VIEWBOX.w - 430}" y="${FLOOR_VIEWBOX.h - 185}" width="340" height="138"></rect>
-      <text class="cad-meta-line" x="${FLOOR_VIEWBOX.w - 412}" y="${FLOOR_VIEWBOX.h - 160}">PROJECT: ${esc(facilityState.scenario.name || "THE FORGE")}</text>
-      <text class="cad-meta-line" x="${FLOOR_VIEWBOX.w - 412}" y="${FLOOR_VIEWBOX.h - 140}">PHASE: COMPLETE</text>
-      <text class="cad-meta-line" x="${FLOOR_VIEWBOX.w - 412}" y="${FLOOR_VIEWBOX.h - 120}">TOTAL CAPACITY: ${(ui.derived.itKw ? kwToMw(ui.derived.itKw) : 0).toFixed(2)} MW IT LOAD</text>
-      <text class="cad-meta-line" x="${FLOOR_VIEWBOX.w - 412}" y="${FLOOR_VIEWBOX.h - 100}">TOTAL RACKS: ${INTEGER.format(racks.installed)}</text>
-      <text class="cad-meta-line" x="${FLOOR_VIEWBOX.w - 412}" y="${FLOOR_VIEWBOX.h - 80}">PUE: ${(facilityState.facility.pue || 0).toFixed(2)}</text>
-      <text class="cad-meta-line" x="${FLOOR_VIEWBOX.w - 412}" y="${FLOOR_VIEWBOX.h - 60}">DRAWN: THE FORGE V1.0</text>
-    </g>` : "";
-
-    const corners = [
-      { x: plan.site.x, y: plan.site.y },
-      { x: plan.site.x + plan.site.w, y: plan.site.y },
-      { x: plan.site.x + plan.site.w, y: plan.site.y + plan.site.h },
-      { x: plan.site.x, y: plan.site.y + plan.site.h },
-    ];
-
-    const cornerMarkers = corners.map((pt) => `<path class="cad-corner-marker" d="M${pt.x - 8} ${pt.y}H${pt.x + 8}M${pt.x} ${pt.y - 8}V${pt.y + 8}"></path>`).join("");
-
-    const roadShoulder = Array.from({ length: 12 }, (_, idx) => {
-      const x = plan.site.x - 210 + idx * 18;
-      const y0 = plan.site.y + plan.site.h * 0.58 + 2;
-      return `<line class="cad-road-shoulder" x1="${x}" y1="${y0}" x2="${x + 7}" y2="${y0 + 11}"></line>`;
-    }).join("");
-
-    const columnXCount = Math.max(3, Math.floor((plan.building.w - 36) / 68));
-    const columnYCount = Math.max(3, Math.floor((plan.building.h - 32) / 58));
-    const columns = [];
-    for (let gx = 0; gx <= columnXCount; gx += 1) {
-      for (let gy = 0; gy <= columnYCount; gy += 1) {
-        const cx = plan.building.x + 18 + (gx * (plan.building.w - 36)) / columnXCount;
-        const cy = plan.building.y + 16 + (gy * (plan.building.h - 30)) / columnYCount;
-        columns.push(`<circle class="cad-column" cx="${cx}" cy="${cy}" r="2.1"></circle>`);
-        if (gx === 0 && gy < 8) {
-          columns.push(`<text class="cad-grid-tag ${drawLabel}" x="${cx - 14}" y="${cy + 3}">${rowCode(gy)}${gx + 1}</text>`);
-        }
-      }
-    }
-
-    const doorArc = (x, y, radius, clockwise = true, swing = 1) => {
-      const endX = clockwise ? x + radius : x - radius;
-      return `<path class="cad-door" d="M${x} ${y}H${endX}M${x} ${y}A${radius} ${radius} 0 0 ${swing} ${endX} ${y + radius}"></path>`;
-    };
-    const doors = showFacility ? `
-      ${doorArc(plan.rooms.loading.x, plan.rooms.loading.y + plan.rooms.loading.h * 0.38, 16, true, 1)}
-      ${doorArc(plan.rooms.office.x + plan.rooms.office.w, plan.rooms.office.y + plan.rooms.office.h * 0.64, 12, false, 0)}
-      ${doorArc(plan.rooms.mmr.x, plan.rooms.mmr.y + plan.rooms.mmr.h * 0.7, 8, false, 0)}
-    ` : "";
-
-    const powerFlow = showPower ? utilityEntries.map((entry, idx) => {
-      const targetX = plan.rooms.switchgear.x + plan.rooms.switchgear.w / 2;
-      const targetY = plan.rooms.switchgear.y + 14 + idx * 16;
-      return `<path class="cad-power-flow live ${drawStroke}" d="M${entry.x} ${entry.y}C${entry.x + 90} ${entry.y - 12}, ${targetX - 30} ${targetY + 12}, ${targetX} ${targetY}"></path>`;
-    }).join("") : "";
-
-    const fuelFarm = showPower && facilityState.power.sources.gas > 0 ? `
-      <g data-inspect-kind="power-source" data-inspect-key="gas">
-        <rect class="cad-concrete-pad ${drawFill}" x="${plan.site.x + plan.site.w - 310}" y="${plan.site.y + plan.site.h - 128}" width="68" height="38"></rect>
-        <circle class="cad-fuel-ring" cx="${plan.site.x + plan.site.w - 276}" cy="${plan.site.y + plan.site.h - 109}" r="34"></circle>
-        <text class="cad-small ${drawLabel}" x="${plan.site.x + plan.site.w - 308}" y="${plan.site.y + plan.site.h - 138}">FUEL TANK FARM</text>
-      </g>
-    ` : "";
-
-    const aisleLabels = showCompute ? racks.aisles.map((aisle) => {
-      const lx = aisle.type === "cold" ? aisle.x + 4 : aisle.x + aisle.w - 4;
-      const anchor = aisle.type === "cold" ? "start" : "end";
-      return `<text class="cad-aisle-label ${drawLabel}" x="${lx}" y="${aisle.y + 9}" text-anchor="${anchor}">${aisle.id}</text>`;
-    }).join("") : "";
-
-    const rowLabels = showCompute ? racks.rowLabels.map((row) => `<text class="cad-row-label ${drawLabel}" x="${plan.rooms.dataHall.x + 4}" y="${row.cy + 3}">${row.label}</text>`).join("") : "";
-
-    const rackPlumbing = showCompute && denseCooling
-      ? racks.manifolds.map((line) => `<line class="cad-manifold ${showDcim && facilityState.dcim.coolingTelemetry ? "live" : ""}" x1="${line.x1}" y1="${line.y}" x2="${line.x2}" y2="${line.y}"></line>`).join("")
-      : racks.trays.map((line) => `<line class="cad-tray" x1="${line.x1}" y1="${line.y}" x2="${line.x2}" y2="${line.y}"></line>`).join("");
-
-    const dcimMeters = showDcim ? racks.pdus.map((pdu, idx) => `<rect class="cad-meter" x="${pdu.x - 1.6}" y="${pdu.y - 1.6}" width="3.2" height="3.2" data-inspect-kind="maintenance" data-inspect-key="meter-${idx}"></rect>`).join("") : "";
-    const dcimLegend = showDcim ? `
-      <g class="${drawLabel}">
-        <rect class="cad-legend-bg" x="${plan.site.x + 14}" y="${plan.site.y + plan.site.h - 120}" width="210" height="88"></rect>
-        <text class="cad-small" x="${plan.site.x + 24}" y="${plan.site.y + plan.site.h - 96}">LEGEND</text>
-        <circle class="cad-sensor" cx="${plan.site.x + 30}" cy="${plan.site.y + plan.site.h - 74}" r="2.5"></circle><text class="cad-small" x="${plan.site.x + 42}" y="${plan.site.y + plan.site.h - 71}">TEMP SENSOR</text>
-        <rect class="cad-meter" x="${plan.site.x + 27}" y="${plan.site.y + plan.site.h - 57}" width="5" height="5"></rect><text class="cad-small" x="${plan.site.x + 42}" y="${plan.site.y + plan.site.h - 52}">POWER METER</text>
-        <circle class="cad-network-tap" cx="${plan.site.x + 30}" cy="${plan.site.y + plan.site.h - 38}" r="2.5"></circle><text class="cad-small" x="${plan.site.x + 42}" y="${plan.site.y + plan.site.h - 35}">NETWORK TAP</text>
-      </g>
-    ` : "";
-
-    const completionScene = complete ? `
-      <g class="${drawLabel}">
-        <path class="cad-human" d="M${plan.rooms.loading.x + 24} ${plan.rooms.loading.y + plan.rooms.loading.h + 18}v12m-4 0h8m-3 -12c0 -2.2 1.8 -4 4 -4s4 1.8 4 4"></path>
-        <path class="cad-human" d="M${plan.rooms.loading.x + 46} ${plan.rooms.loading.y + plan.rooms.loading.h + 16}v12m-4 0h8m-3 -12c0 -2.2 1.8 -4 4 -4s4 1.8 4 4"></path>
-        <rect class="cad-vehicle" x="${plan.rooms.loading.x + plan.rooms.loading.w - 52}" y="${plan.rooms.loading.y + plan.rooms.loading.h + 4}" width="40" height="14" rx="2"></rect>
-        <circle class="cad-vehicle" cx="${plan.rooms.loading.x + plan.rooms.loading.w - 44}" cy="${plan.rooms.loading.y + plan.rooms.loading.h + 20}" r="2.8"></circle>
-        <circle class="cad-vehicle" cx="${plan.rooms.loading.x + plan.rooms.loading.w - 22}" cy="${plan.rooms.loading.y + plan.rooms.loading.h + 20}" r="2.8"></circle>
-      </g>
-    ` : "";
-
-    return `
-      <g id="layer-site" style="${layerStyle("site")}">
-        ${showSite ? renderSiteContext(plan, locationType, withTransition) : ""}
-        ${showSite ? `<rect class="cad-site-boundary ${drawStroke}" x="${plan.site.x}" y="${plan.site.y}" width="${plan.site.w}" height="${plan.site.h}" data-inspect-kind="acreage" data-inspect-key="value"></rect>` : ""}
-        ${showSite ? cornerMarkers : ""}
-        ${showSite ? `<rect class="cad-setback ${drawStroke}" x="${plan.site.x + plan.site.setback}" y="${plan.site.y + plan.site.setback}" width="${plan.site.w - plan.site.setback * 2}" height="${plan.site.h - plan.site.setback * 2}"></rect>` : ""}
-        ${showSite ? `<path class="cad-road ${drawStroke}" d="M${plan.site.x - 240} ${plan.site.y + plan.site.h * 0.58}H${plan.site.x + 8}"></path><path class="cad-road ${drawStroke}" d="M${plan.site.x - 240} ${plan.site.y + plan.site.h * 0.58 + 15}H${plan.site.x + 8}"></path>` : ""}
-        ${showSite ? roadShoulder : ""}
-        ${showSite ? `<text class="cad-site-area ${drawLabel}" x="${plan.site.x + plan.site.w / 2}" y="${plan.site.y + plan.site.h / 2}" text-anchor="middle">±${plan.site.acres.toFixed(1)} ACRES</text>` : ""}
-      </g>
-      <g id="layer-building" style="${layerStyle("building")}">
-        ${showSite && phase === 1 ? `<rect class="cad-footprint-tbd ${drawStroke}" x="${plan.building.x}" y="${plan.building.y}" width="${plan.building.w}" height="${plan.building.h}"></rect><text class="cad-room-label ${drawLabel}" x="${plan.building.x + plan.building.w / 2}" y="${plan.building.y + plan.building.h / 2 - 8}" text-anchor="middle">FOOTPRINT TBD</text>` : ""}
-        ${showPower ? `<rect class="cad-building-shell ${drawStroke}" x="${plan.building.x}" y="${plan.building.y}" width="${plan.building.w}" height="${plan.building.h}" data-inspect-kind="facility" data-inspect-key="shell"></rect>` : ""}
-        ${showFacility ? doors : ""}
-        ${showFacility ? columns.join("") : ""}
-      </g>
-      <g id="layer-rooms" style="${layerStyle("rooms")}">
-        ${showFacility ? `<rect class="cad-room cad-room-whitehall ${drawFill}" x="${plan.rooms.dataHall.x}" y="${plan.rooms.dataHall.y}" width="${plan.rooms.dataHall.w}" height="${plan.rooms.dataHall.h}"></rect>` : ""}
-        ${showFacility ? `<rect class="cad-raised-floor ${drawStroke}" x="${plan.rooms.dataHall.x + 12}" y="${plan.rooms.dataHall.y + 12}" width="${plan.rooms.dataHall.w - 24}" height="${plan.rooms.dataHall.h - 24}"></rect>` : ""}
-        ${showFacility ? `<rect class="cad-room cad-room-mechanical ${drawFill}" x="${plan.rooms.mechanical.x}" y="${plan.rooms.mechanical.y}" width="${plan.rooms.mechanical.w}" height="${plan.rooms.mechanical.h}" data-inspect-kind="cooling" data-inspect-key="${facilityState.facility.coolingType || "air"}"></rect>` : ""}
-        ${showFacility ? `<rect class="cad-room cad-room-electrical ${drawFill}" x="${plan.rooms.electrical.x}" y="${plan.rooms.electrical.y}" width="${plan.rooms.electrical.w}" height="${plan.rooms.electrical.h}" data-inspect-kind="power-substation" data-inspect-key="mer"></rect>` : ""}
-        ${showFacility ? `<rect class="cad-room cad-room-office ${drawFill}" x="${plan.rooms.office.x}" y="${plan.rooms.office.y}" width="${plan.rooms.office.w}" height="${plan.rooms.office.h}"></rect><rect class="cad-room cad-room-loading ${drawFill}" x="${plan.rooms.loading.x}" y="${plan.rooms.loading.y}" width="${plan.rooms.loading.w}" height="${plan.rooms.loading.h}"></rect><rect class="cad-room cad-room-electrical ${drawFill}" x="${plan.rooms.mmr.x}" y="${plan.rooms.mmr.y}" width="${plan.rooms.mmr.w}" height="${plan.rooms.mmr.h}" data-inspect-kind="fiber-access" data-inspect-key="${facilityState.fiber.accessType || "lit"}"></rect>` : ""}
-        ${showFacility ? `<text class="cad-room-label ${drawLabel}" x="${plan.rooms.dataHall.x + 12}" y="${plan.rooms.dataHall.y + 18}">DATA FLOOR</text><text class="cad-room-label ${drawLabel}" x="${plan.rooms.mechanical.x + 8}" y="${plan.rooms.mechanical.y + 18}">MECHANICAL</text><text class="cad-room-label ${drawLabel}" x="${plan.rooms.electrical.x + 8}" y="${plan.rooms.electrical.y + 18}">ELECTRICAL</text><text class="cad-room-label ${drawLabel}" x="${plan.rooms.mmr.x + 8}" y="${plan.rooms.mmr.y + 16}">MMR</text><text class="cad-small ${drawLabel}" x="${plan.rooms.dataHall.x + plan.rooms.dataHall.w - 164}" y="${plan.rooms.dataHall.y + 18}">CLG HT: 12'-0"</text>` : ""}
-        ${phase >= 4 ? `<text class="cad-room-label ${drawLabel}" x="${plan.building.x + 8}" y="${plan.building.y - 12}">${esc(facilityState.scenario.name || "THE FORGE")} — PHASE 4 COMPLETE</text>` : ""}
-      </g>
-      <g id="layer-racks" style="${layerStyle("racks")}">
-        ${showCompute ? racks.aisles.map((aisle, idx) => `<rect class="cad-aisle ${aisle.type}" x="${aisle.x}" y="${aisle.y}" width="${aisle.w}" height="${aisle.h}"></rect>`).join("") : ""}
-        ${aisleLabels}
-        ${rowLabels}
-        ${showCompute ? rackPlumbing : ""}
-        ${rackNodes}
-        ${showCompute ? `<text class="cad-rack-count ${drawLabel}" x="${plan.rooms.dataHall.x + 10}" y="${plan.rooms.dataHall.y + plan.rooms.dataHall.h - 12}">${INTEGER.format(racks.installed)} RACKS INSTALLED / ${INTEGER.format(racks.capacity)} CAPACITY</text>` : ""}
-      </g>
-      <g id="layer-power" style="${layerStyle("power")}">
-        ${showPower ? utilityEntries.map((entry) => `<g data-inspect-kind="power-source" data-inspect-key="fom"><circle class="cad-utility-poi ${drawStroke}" cx="${entry.x}" cy="${entry.y}" r="11"></circle><line class="cad-utility-poi ${drawStroke}" x1="${entry.x - 7}" y1="${entry.y - 7}" x2="${entry.x + 7}" y2="${entry.y + 7}"></line><line class="cad-utility-poi ${drawStroke}" x1="${entry.x + 7}" y1="${entry.y - 7}" x2="${entry.x - 7}" y2="${entry.y + 7}"></line><text class="cad-small ${drawLabel}" x="${entry.x + 16}" y="${entry.y - 10}">UTILITY POI — ${utilityLabelMw}MW</text></g>`).join("") : ""}
-        ${showPower ? `<rect class="cad-room cad-room-electrical ${drawFill}" x="${plan.rooms.switchgear.x}" y="${plan.rooms.switchgear.y}" width="${plan.rooms.switchgear.w}" height="${plan.rooms.switchgear.h}" data-inspect-kind="power-substation" data-inspect-key="switchgear"></rect>` : ""}
-        ${showPower ? `<text class="cad-small ${drawLabel}" x="${plan.rooms.switchgear.x - 6}" y="${plan.rooms.switchgear.y - 8}">SWITCHGEAR</text>` : ""}
-        ${powerFlow}
-        ${showPower ? solarArrays : ""}
-        ${windPpa}
-        ${smrBlock}
-        ${showPower ? powerPads : ""}
-        ${fuelFarm}
-      </g>
-      <g id="layer-cooling" style="${layerStyle("cooling")}">
-        ${showFacility ? `<path class="cad-cooling-pipe ${showDcim && facilityState.dcim.coolingTelemetry ? "live" : ""}" d="M${plan.rooms.mechanical.x + plan.rooms.mechanical.w} ${plan.rooms.mechanical.y + plan.rooms.mechanical.h * 0.38}H${plan.rooms.dataHall.x + plan.rooms.dataHall.w - 8}"></path>` : ""}
-        ${showFacility ? `<path class="cad-cooling-pipe ${showDcim && facilityState.dcim.coolingTelemetry ? "live" : ""}" d="M${plan.rooms.mechanical.x + plan.rooms.mechanical.w} ${plan.rooms.mechanical.y + plan.rooms.mechanical.h * 0.72}H${plan.rooms.dataHall.x + plan.rooms.dataHall.w - 8}"></path>` : ""}
-      </g>
-      <g id="layer-annotations" style="${layerStyle("annotations")}">
-        ${showSite ? `<line class="cad-dim-ext" x1="${plan.site.x}" y1="${plan.site.y - 30}" x2="${plan.site.x}" y2="${plan.site.y - 10}"></line><line class="cad-dim-ext" x1="${plan.site.x + plan.site.w}" y1="${plan.site.y - 30}" x2="${plan.site.x + plan.site.w}" y2="${plan.site.y - 10}"></line><line class="cad-dim-line" x1="${plan.site.x}" y1="${plan.site.y - 20}" x2="${plan.site.x + plan.site.w}" y2="${plan.site.y - 20}" marker-start="url(#cad-arrow)" marker-end="url(#cad-arrow)"></line><text class="cad-dim-text ${drawLabel}" x="${plan.site.x + plan.site.w / 2}" y="${plan.site.y - 26}" text-anchor="middle">${toFeetInches(plan.site.widthFt)}</text><line class="cad-dim-ext" x1="${plan.site.x + plan.site.w + 28}" y1="${plan.site.y}" x2="${plan.site.x + plan.site.w + 8}" y2="${plan.site.y}"></line><line class="cad-dim-ext" x1="${plan.site.x + plan.site.w + 28}" y1="${plan.site.y + plan.site.h}" x2="${plan.site.x + plan.site.w + 8}" y2="${plan.site.y + plan.site.h}"></line><line class="cad-dim-line" x1="${plan.site.x + plan.site.w + 18}" y1="${plan.site.y}" x2="${plan.site.x + plan.site.w + 18}" y2="${plan.site.y + plan.site.h}" marker-start="url(#cad-arrow)" marker-end="url(#cad-arrow)"></line><text class="cad-dim-text ${drawLabel}" x="${plan.site.x + plan.site.w + 24}" y="${plan.site.y + plan.site.h / 2}" transform="rotate(90 ${plan.site.x + plan.site.w + 24} ${plan.site.y + plan.site.h / 2})" text-anchor="middle">${toFeetInches(plan.site.depthFt)}</text><text class="cad-small ${drawLabel}" x="${plan.site.x + plan.site.setback + 6}" y="${plan.site.y + plan.site.setback - 8}">REQUIRED SETBACK — 50FT</text>` : ""}
-        ${showNetwork ? `${networkRows.zones}${networkRows.mda}${networkRows.spine}${networkRows.hdas}${networkRows.leafs}${networkRows.paths}` : ""}
-        ${showDcim ? networkRows.taps : ""}
-        ${dcimLegend}
-        ${metadata}
-      </g>
-      <g id="layer-overlay" style="${layerStyle("overlay")}">
-        ${renderSelectionHighlight(plan)}
-        ${showFiber ? `<path class="cad-fiber-run ${drawStroke}" d="M${plan.site.x + plan.site.w - 16} ${plan.site.y + plan.site.h * 0.28}L${plan.rooms.mmr.x + plan.rooms.mmr.w / 2} ${plan.rooms.mmr.y + plan.rooms.mmr.h / 2}"></path><text class="cad-small ${drawLabel}" x="${plan.site.x + plan.site.w - 206}" y="${plan.site.y + plan.site.h * 0.28 - 10}">FIBER ENTRY — ${fiberStrands} STRANDS</text><text class="cad-small ${drawLabel}" x="${plan.rooms.mmr.x + plan.rooms.mmr.w + 10}" y="${plan.rooms.mmr.y + 14}">${carrierLabel}</text><rect class="cad-pop ${drawFill}" x="${plan.site.x + plan.site.w - 28}" y="${plan.site.y + plan.site.h * 0.28 - 10}" width="12" height="12"></rect>` : ""}
-        ${showFiber && facilityState.fiber.carriers.length >= 2 ? `<path class="cad-fiber-run ${drawStroke}" d="M${plan.site.x + plan.site.w * 0.22} ${plan.site.y - 14}L${plan.rooms.mmr.x + plan.rooms.mmr.w / 2} ${plan.rooms.mmr.y + plan.rooms.mmr.h / 2}"></path>` : ""}
-        ${dcimMeters}
-        ${completionScene}
-      </g>
-    `;
-  }
-
-  function renderCadFixedOverlay(plan) {
-    const feetPerScreenUnit = (1 / Math.max(0.00001, plan.feetToUnit)) / Math.max(0.45, ui.canvas.zoom);
-    const scaleFeet = pickScaleFeet(feetPerScreenUnit * 120);
-    const scaleBarWidth = scaleFeet / feetPerScreenUnit;
-    return `<g class="cad-fixed-overlay">
-      <g class="cad-north-arrow">
-        <line x1="${FLOOR_VIEWBOX.w - 110}" y1="${FLOOR_VIEWBOX.h - 156}" x2="${FLOOR_VIEWBOX.w - 110}" y2="${FLOOR_VIEWBOX.h - 108}" stroke="#555555" stroke-width="1.4"></line>
-        <path d="M${FLOOR_VIEWBOX.w - 116} ${FLOOR_VIEWBOX.h - 145}L${FLOOR_VIEWBOX.w - 110} ${FLOOR_VIEWBOX.h - 156}L${FLOOR_VIEWBOX.w - 104} ${FLOOR_VIEWBOX.h - 145}" fill="none" stroke="#555555" stroke-width="1.4"></path>
-        <text class="cad-small" x="${FLOOR_VIEWBOX.w - 121}" y="${FLOOR_VIEWBOX.h - 95}">N</text>
-      </g>
-      <g class="cad-scale-bar">
-        <line x1="${FLOOR_VIEWBOX.w - 290}" y1="${FLOOR_VIEWBOX.h - 52}" x2="${FLOOR_VIEWBOX.w - 290 + scaleBarWidth}" y2="${FLOOR_VIEWBOX.h - 52}" stroke="#555555" stroke-width="2"></line>
-        <line x1="${FLOOR_VIEWBOX.w - 290}" y1="${FLOOR_VIEWBOX.h - 58}" x2="${FLOOR_VIEWBOX.w - 290}" y2="${FLOOR_VIEWBOX.h - 46}" stroke="#555555" stroke-width="1"></line>
-        <line x1="${FLOOR_VIEWBOX.w - 290 + scaleBarWidth}" y1="${FLOOR_VIEWBOX.h - 58}" x2="${FLOOR_VIEWBOX.w - 290 + scaleBarWidth}" y2="${FLOOR_VIEWBOX.h - 46}" stroke="#555555" stroke-width="1"></line>
-        <text class="cad-small" x="${FLOOR_VIEWBOX.w - 290}" y="${FLOOR_VIEWBOX.h - 64}">${toFeetInches(scaleFeet)} SCALE BAR</text>
-      </g>
-    </g>`;
-  }
-
-  function pickScaleFeet(targetFeet) {
-    const choices = [25, 50, 100, 200, 400, 800, 1000, 1500, 2000];
-    return choices.find((n) => n >= targetFeet) || 2000;
-  }
-
-  function toFeetInches(feetValue) {
-    const totalInches = Math.round(Number(feetValue || 0) * 12);
-    const ft = Math.floor(totalInches / 12);
-    const inches = Math.abs(totalInches % 12);
-    return `${ft}'-${String(inches).padStart(2, "0")}"`;
   }
 
   function arcControl(x1, y1, x2, y2) {
@@ -5124,47 +4352,6 @@
     if (facilityState.events.length > 5000) {
       facilityState.events.shift();
     }
-  }
-
-  function exportActiveDrawing() {
-    const svg = el.constructionCanvas.querySelector("svg");
-    if (!svg) {
-      pushLog("EXPORT FAILED — NO DRAWING IN CANVAS", "warn");
-      return;
-    }
-
-    try {
-      const clone = svg.cloneNode(true);
-      clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
-      clone.setAttribute("xmlns:xlink", "http://www.w3.org/1999/xlink");
-      clone.querySelectorAll(".travel-dot").forEach((node) => node.remove());
-
-      const serialized = new XMLSerializer().serializeToString(clone);
-      const payload = `<?xml version="1.0" encoding="UTF-8"?>\n${serialized}\n`;
-      const mode = ui.mode === VIEW_MODE.MAP ? "map" : "floor";
-      downloadTextFile(`forge-${mode}-${facilityState.scenario.id}.svg`, payload, "image/svg+xml;charset=utf-8");
-      pushLog(`DRAWING EXPORTED (${mode.toUpperCase()} SVG)`, "good");
-      emitEvent("DRAWING_EXPORTED", { mode, bytes: payload.length }, "INFO");
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "UNKNOWN EXPORT ERROR";
-      pushLog(`EXPORT FAILED — ${message.toUpperCase()}`, "warn");
-      emitEvent("ERROR_EXPORT_DRAWING", { reason: message }, "ERROR");
-    }
-  }
-
-  function downloadTextFile(filename, content, mimeType = "application/json;charset=utf-8") {
-    const blob = new Blob([content], { type: mimeType });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    a.style.display = "none";
-    document.body.appendChild(a);
-    a.click();
-    window.setTimeout(() => {
-      URL.revokeObjectURL(url);
-      a.remove();
-    }, 1800);
   }
 
   function parseBoundedNumber(raw, min, max) {
