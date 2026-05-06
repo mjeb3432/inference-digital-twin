@@ -700,11 +700,11 @@
      * highlights into believable shoulder rolloff (instead of clipping
      * to white), and pulls shadow detail out of the floor. The single
      * biggest "looks more real" delta after IBL.
-     * Exposure 1.05 lifts the scene a hair so the 0x0d1620 background
-     * doesn't crush in dark environments. */
+     * Exposure 0.78 keeps the scene grounded — earlier value 1.05 was
+     * blowing out the sky and the IBL specular highlights. */
     if (THREE.ACESFilmicToneMapping !== undefined) {
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      renderer.toneMappingExposure = 1.05;
+      renderer.toneMappingExposure = 0.78;
     }
 
     /* Sticking with PCFSoftShadowMap — broadly compatible across
@@ -726,8 +726,10 @@
     const ambient = new THREE.AmbientLight(0xffffff, 0.12);
     scene.add(ambient);
 
-    /* Cool sun-like key light */
-    const keyLight = new THREE.DirectionalLight(0xfff1e0, 0.85);
+    /* Cool sun-like key light — intensity tuned down so highlights
+     * on glass + metal don't blow out under IBL. The sun reads as
+     * present but not blown out. */
+    const keyLight = new THREE.DirectionalLight(0xfff1e0, 0.55);
     keyLight.position.set(80, 110, 60);
     keyLight.castShadow = true;
     keyLight.shadow.mapSize.set(2048, 2048);
@@ -789,7 +791,7 @@
            * strength so shadows still have direction and form. */
           hemi.intensity = 0.18;
           ambient.intensity = 0.04;
-          renderer.toneMappingExposure = 0.95;
+          renderer.toneMappingExposure = 0.7;
         })
         .catch(() => {
           /* Silently fall back. Analytic lights remain authoritative. */
@@ -881,14 +883,15 @@
       c.width = 512; c.height = 512;
       const x = c.getContext("2d");
       const g = x.createRadialGradient(256, 256, 8, 256, 256, 250);
-      /* Hot bright core → warm orange → deep orange-red → fade */
-      g.addColorStop(0.00, "rgba(255, 245, 220, 1.00)");
-      g.addColorStop(0.04, "rgba(255, 195, 110, 0.95)");
-      g.addColorStop(0.12, "rgba(255, 140, 60,  0.78)");
-      g.addColorStop(0.30, "rgba(255, 100, 40,  0.42)");
-      g.addColorStop(0.55, "rgba(220, 70,  30,  0.18)");
-      g.addColorStop(0.85, "rgba(180, 55,  25,  0.05)");
-      g.addColorStop(1.00, "rgba(160, 50,  20,  0.00)");
+      /* Softer sun: muted core + gentler corona. Earlier values were
+       * full-brightness which under daylight + IBL looked over-baked
+       * with a halo eating half the sky. */
+      g.addColorStop(0.00, "rgba(255, 245, 220, 0.85)");
+      g.addColorStop(0.06, "rgba(255, 220, 165, 0.55)");
+      g.addColorStop(0.18, "rgba(255, 195, 130, 0.28)");
+      g.addColorStop(0.42, "rgba(255, 175, 110, 0.10)");
+      g.addColorStop(0.72, "rgba(220, 150, 100, 0.03)");
+      g.addColorStop(1.00, "rgba(180, 130, 90, 0.00)");
       x.fillStyle = g;
       x.fillRect(0, 0, 512, 512);
       const tex = new THREE.CanvasTexture(c);
@@ -897,37 +900,37 @@
       return tex;
     }
 
-    /* Hot solid core — small + bright. Pushed FAR into the
+    /* Hot solid core — smaller now (was r=3.2). Pushed FAR into the
      * upper-left distance so the sun reads as a real distant
-     * celestial body, not an in-frame prop. The further back, the
-     * less it competes with the building for the user's attention. */
+     * celestial body, not an in-frame prop. */
     const sunCore = new THREE.Mesh(
-      new THREE.SphereGeometry(3.2, 28, 18),
-      new THREE.MeshBasicMaterial({ color: 0xfff3c4 })
+      new THREE.SphereGeometry(1.8, 24, 16),
+      new THREE.MeshBasicMaterial({ color: 0xffe8b8 })
     );
-    sunCore.position.set(-220, 130, -200);
+    sunCore.position.set(-260, 150, -240);
     scene.add(sunCore);
 
-    /* Big billboarded glow sprite — the visible corona. Same
-     * world-unit scale; perspective makes it appear smaller from
-     * far away while still reading as a glowing sun. */
+    /* Smaller, more diffuse glow corona (was scale 110). The sprite
+     * is now ~half the visible size and starts at lower opacity so
+     * it reads as a hazy daylight sun rather than a heat lamp. */
     const sunGlowSprite = new THREE.Sprite(
       new THREE.SpriteMaterial({
         map: makeSunGlowTexture(),
         transparent: true,
         depthWrite: false,
-        opacity: 1.0,
+        opacity: 0.55,
       })
     );
-    sunGlowSprite.scale.set(110, 110, 1);
+    sunGlowSprite.scale.set(60, 60, 1);
     sunGlowSprite.position.copy(sunCore.position);
     scene.add(sunGlowSprite);
 
     const sun = sunCore; // alias used elsewhere for repositioning
 
-    /* Warm point light cast FROM the sun's position so the building
-     * and equipment pick up a warm rim on the sun-facing side. */
-    const sunLight = new THREE.PointLight(0xffaa55, 0.45, 480, 1.5);
+    /* Warm point light cast FROM the sun's position. Intensity
+     * reduced from 0.45 → 0.18 since IBL now carries most of the
+     * directional warmth; this just adds a gentle rim cue. */
+    const sunLight = new THREE.PointLight(0xffaa55, 0.18, 480, 1.5);
     sunLight.position.copy(sun.position);
     scene.add(sunLight);
 
@@ -1256,8 +1259,10 @@
       const groundH = Math.max(sw(plan.site.h) + 60, sw(plan.site.h) * 1.4);
       const groundGeo = new THREE.BoxGeometry(groundW, 0.18, groundH);
       const groundMat = new THREE.MeshStandardMaterial({
-        color: 0x4a523c, roughness: 0.96, metalness: 0.0,
+        color: 0x4a523c,
+        roughness: 1.0, metalness: 0.0,
         roughnessMap: proceduralNoiseTexture({ size: 64, scale: 12, seed: 113 }),
+        envMapIntensity: 0.35, // dim IBL contribution so ground stays matte
       });
       const groundMesh = new THREE.Mesh(groundGeo, groundMat);
       groundMesh.position.set(0, -0.9, 0);
@@ -1270,8 +1275,9 @@
       /* Site (parcel) plate — the "owned" land inside the fence line. */
       const siteGeo = new THREE.BoxGeometry(sw(plan.site.w), 0.2, sw(plan.site.h));
       const siteMat = new THREE.MeshStandardMaterial({
-        color: sitePal.ground, roughness: 0.95, metalness: 0.0,
+        color: sitePal.ground, roughness: 1.0, metalness: 0.0,
         roughnessMap: proceduralNoiseTexture({ size: 64, scale: 8, seed: 119 }),
+        envMapIntensity: 0.35,
       });
       const siteMesh = new THREE.Mesh(siteGeo, siteMat);
       siteMesh.position.set(sx, -0.5, sz);
@@ -1288,8 +1294,9 @@
       const setH = sw(plan.site.h - plan.site.setback * 2);
       const setGeo = new THREE.BoxGeometry(setW, 0.1, setH);
       const setMat = new THREE.MeshStandardMaterial({
-        color: sitePal.setback, roughness: 0.95, metalness: 0.0,
+        color: sitePal.setback, roughness: 1.0, metalness: 0.0,
         roughnessMap: proceduralNoiseTexture({ size: 64, scale: 8, seed: 127 }),
+        envMapIntensity: 0.35,
       });
       const setMesh = new THREE.Mesh(setGeo, setMat);
       setMesh.position.set(sx, -0.4, sz);
@@ -1306,8 +1313,9 @@
       const yardX_world = -sw(plan.site.w) * 0.5 - yardOffset * 0.5;
       const yardGeo = new THREE.BoxGeometry(yardW, 0.16, yardH);
       const yardMat = new THREE.MeshStandardMaterial({
-        color: 0x747a82, roughness: 0.95, metalness: 0.05,
+        color: 0x747a82, roughness: 1.0, metalness: 0.05,
         roughnessMap: proceduralNoiseTexture({ size: 64, scale: 6, seed: 131 }),
+        envMapIntensity: 0.35,
       });
       const yardPad = new THREE.Mesh(yardGeo, yardMat);
       yardPad.position.set(yardX_world, -0.42, 0);
@@ -1840,8 +1848,9 @@
     const bldg = plan.building;
     const slabGeo = new THREE.BoxGeometry(sw(bldg.w) * 1.04, 0.4, sw(bldg.h) * 1.04);
     const slabMat = new THREE.MeshStandardMaterial({
-      color: 0x747a82, roughness: 0.85, metalness: 0.1,
+      color: 0x747a82, roughness: 1.0, metalness: 0.0,
       roughnessMap: proceduralNoiseTexture({ size: 64, scale: 4, seed: 137 }),
+      envMapIntensity: 0.4,
     });
     const slab = new THREE.Mesh(slabGeo, slabMat);
     slab.position.set(0, -0.2, 0);
@@ -2456,12 +2465,15 @@
       /* Staff parking lot — east of the building, ~16 cars in two
        * rows. Two cars use slightly different scales for variety,
        * with random hue variation per-instance. */
-      const parkingX = W / 2 + 6;
-      const parkingZ = D * 0.22;
+      /* Pushed further east so it sits CLEAR of the office wing
+       * (which extends from W/2 outward by ~36% of W). */
+      const parkingX = W / 2 + W * 0.36 + 4.5;
+      const parkingZ = D * 0.18;
       const parkingPad = new THREE.Mesh(
         new THREE.BoxGeometry(11, 0.12, 8),
         new THREE.MeshStandardMaterial({
-          color: 0x4a5258, roughness: 0.93, metalness: 0,
+          color: 0x4a5258, roughness: 1.0, metalness: 0,
+          envMapIntensity: 0.3,
         }),
       );
       parkingPad.position.set(parkingX, 0.06, parkingZ);
@@ -2779,6 +2791,309 @@
       const logoPlate = new THREE.Mesh(new THREE.BoxGeometry(0.2, 1.2, 3.0), logoMat);
       logoPlate.position.set(W / 2 + 0.08, BUILDING_HEIGHT * 0.78, D * 0.18);
       worldGroup.add(logoPlate);
+
+      /* ---------- MULTI-VOLUME BUILDING COMPOSITION ----------
+       *
+       * Real hyperscaler DCs are NEVER a single rectangular box.
+       * They're composed of:
+       *   - The main DATA-HALL MASS (the big bulk we already have)
+       *   - An OFFICE WING attached on one short side at lower
+       *     height with more glazing (the people-side)
+       *   - A STAIR / SERVICES TOWER at one corner, taller than the
+       *     main mass — vertical accent volume
+       *   - A RECESSED ENTRY PORTAL cut into the office wing's
+       *     facade with a cantilevered glass canopy
+       *   - A BRAND-COLOR STRIPE band wrapping the data-hall cap
+       *
+       * These extra volumes attach OUTSIDE the existing building
+       * footprint (to the +X side) so they don't conflict with the
+       * interior plan rooms. */
+
+      /* OFFICE WING — extends east of the main mass. ~35% of the
+       * width, full depth, lower height (~70%). Cap material is
+       * different from the main mass so the silhouette reads as a
+       * composed building. */
+      const officeW = W * 0.36;
+      const officeH = BUILDING_HEIGHT * 0.74;
+      const officeD = D * 0.78;
+      const officeOriginX = W / 2 + officeW / 2 - 0.3; // slight overlap so seam reads as continuous
+      const officeOriginZ = -D * 0.06;
+
+      const officeShellMat = new THREE.MeshStandardMaterial({
+        color: 0xc8cdd4, roughness: 0.55, metalness: 0.3,
+        roughnessMap: proceduralNoiseTexture({ size: 64, scale: 4, seed: 161 }),
+        envMapIntensity: 0.55,
+      });
+      const officeGlassMat = new THREE.MeshStandardMaterial({
+        color: 0x4f7a93, roughness: 0.18, metalness: 0.85,
+        transparent: true, opacity: 0.62,
+        envMapIntensity: 0.9,
+      });
+      const officeMullionMat = new THREE.MeshStandardMaterial({
+        color: 0x9099a3, roughness: 0.4, metalness: 0.75,
+      });
+      const accentStripeMat = new THREE.MeshStandardMaterial({
+        color: 0x33fbd3, roughness: 0.4, metalness: 0,
+        emissive: 0x33fbd3, emissiveIntensity: 0.45,
+      });
+
+      /* Office shell — chamfered painted-concrete kicker (lower 25%)
+       * + ribbon glass middle band + slim white cap (top 25%). Three
+       * distinct materials = three distinct horizontal bands. */
+      const officeKickerH = officeH * 0.28;
+      const officeRibbonH = officeH * 0.5;
+      const officeCapH = officeH - officeKickerH - officeRibbonH;
+      const officeKicker = new THREE.Mesh(
+        roundedBox(officeW, officeKickerH, officeD, 0.08),
+        officeShellMat,
+      );
+      officeKicker.position.set(officeOriginX, officeKickerH / 2, officeOriginZ);
+      officeKicker.castShadow = true;
+      officeKicker.receiveShadow = true;
+      worldGroup.add(officeKicker);
+
+      const officeRibbon = new THREE.Mesh(
+        new THREE.BoxGeometry(officeW * 0.99, officeRibbonH, officeD * 0.99),
+        officeGlassMat,
+      );
+      officeRibbon.position.set(
+        officeOriginX,
+        officeKickerH + officeRibbonH / 2,
+        officeOriginZ,
+      );
+      worldGroup.add(officeRibbon);
+
+      const officeCap = new THREE.Mesh(
+        roundedBox(officeW, officeCapH, officeD, 0.06),
+        officeShellMat,
+      );
+      officeCap.position.set(
+        officeOriginX,
+        officeKickerH + officeRibbonH + officeCapH / 2,
+        officeOriginZ,
+      );
+      officeCap.castShadow = true;
+      worldGroup.add(officeCap);
+
+      /* Office wing parapet edge */
+      const officeParapet = new THREE.Mesh(
+        new THREE.BoxGeometry(officeW + 0.1, 0.32, officeD + 0.1),
+        officeMullionMat,
+      );
+      officeParapet.position.set(officeOriginX, officeH + 0.1, officeOriginZ);
+      worldGroup.add(officeParapet);
+
+      /* Curtain-wall mullions across the office wing's ribbon glass
+       * (every ~1.2m). InstancedMesh single draw call. */
+      const officeMullCount = Math.floor(officeW / 1.2);
+      const officeMullionGeo = new THREE.BoxGeometry(0.06, officeRibbonH, 0.08);
+      const officeMullMesh = new THREE.InstancedMesh(officeMullionGeo, officeMullionMat, officeMullCount * 2);
+      const tmpOfM = new THREE.Matrix4();
+      const tmpOfP = new THREE.Vector3();
+      const tmpOfQ = new THREE.Quaternion();
+      const tmpOfS = new THREE.Vector3(1, 1, 1);
+      let omIdx = 0;
+      for (let m = 1; m < officeMullCount; m++) {
+        const t = m / officeMullCount;
+        const mx = officeOriginX - officeW / 2 + t * officeW;
+        for (const sz of [officeOriginZ + officeD / 2, officeOriginZ - officeD / 2]) {
+          tmpOfP.set(mx, officeKickerH + officeRibbonH / 2, sz);
+          tmpOfM.compose(tmpOfP, tmpOfQ, tmpOfS);
+          officeMullMesh.setMatrixAt(omIdx++, tmpOfM);
+        }
+      }
+      officeMullMesh.count = omIdx;
+      officeMullMesh.instanceMatrix.needsUpdate = true;
+      worldGroup.add(officeMullMesh);
+
+      /* RECESSED ENTRY PORTAL — cut a notch into the office wing's
+       * east face to create a sheltered entry. Implemented by
+       * adding two side walls + a back wall + a glass storefront
+       * + cantilever canopy roof, all inside a recess on the +X
+       * face of the wing. */
+      const entryNotchW = 4.0;
+      const entryNotchH = officeH * 0.6;
+      const entryNotchD = 1.6; // recessed 1.6m back from face
+      const entryFaceX = officeOriginX + officeW / 2;
+      const entryFaceZ = officeOriginZ;
+
+      /* Notch back wall (interior surface where the entry doors are) */
+      const entryBack = new THREE.Mesh(
+        new THREE.BoxGeometry(entryNotchW, entryNotchH, 0.08),
+        officeShellMat,
+      );
+      entryBack.position.set(
+        entryFaceX - entryNotchD,
+        entryNotchH / 2,
+        entryFaceZ,
+      );
+      entryBack.rotation.y = Math.PI / 2;
+      worldGroup.add(entryBack);
+
+      /* Storefront glass — full-height glazed entry */
+      const entryGlass = new THREE.Mesh(
+        new THREE.BoxGeometry(entryNotchW * 0.85, entryNotchH * 0.92, 0.04),
+        officeGlassMat,
+      );
+      entryGlass.position.set(
+        entryFaceX - entryNotchD + 0.05,
+        entryNotchH * 0.46,
+        entryFaceZ,
+      );
+      entryGlass.rotation.y = Math.PI / 2;
+      worldGroup.add(entryGlass);
+
+      /* Vertical mullions across the storefront */
+      for (let m = 1; m < 5; m++) {
+        const mz = entryFaceZ - entryNotchW / 2 + (m / 5) * entryNotchW;
+        const stuMull = new THREE.Mesh(
+          new THREE.BoxGeometry(0.06, entryNotchH * 0.92, 0.06),
+          officeMullionMat,
+        );
+        stuMull.position.set(entryFaceX - entryNotchD + 0.07, entryNotchH * 0.46, mz);
+        worldGroup.add(stuMull);
+      }
+
+      /* Cantilever canopy — extends FORWARD from the recess top
+       * over the entry pad. Slim chamfered box with mint-emissive
+       * underside strip (the brand-color "welcome" cue). */
+      const canopyW = entryNotchW + 1.6;
+      const canopyDepth = entryNotchD + 1.0;
+      const canopyMain = new THREE.Mesh(
+        roundedBox(canopyDepth, 0.18, canopyW, 0.04),
+        officeShellMat,
+      );
+      canopyMain.position.set(
+        entryFaceX - entryNotchD + canopyDepth / 2,
+        entryNotchH + 0.1,
+        entryFaceZ,
+      );
+      canopyMain.castShadow = true;
+      worldGroup.add(canopyMain);
+
+      const canopyAccent = new THREE.Mesh(
+        new THREE.BoxGeometry(canopyDepth * 0.95, 0.04, canopyW * 0.95),
+        accentStripeMat,
+      );
+      canopyAccent.position.set(
+        entryFaceX - entryNotchD + canopyDepth / 2,
+        entryNotchH + 0.0,
+        entryFaceZ,
+      );
+      worldGroup.add(canopyAccent);
+
+      /* Canopy support rod (one tension rod from canopy edge to
+       * roof, common in modern arch-viz lobbies) */
+      const canopyRod = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.025, 0.025, officeH - entryNotchH - 0.1, 6),
+        officeMullionMat,
+      );
+      canopyRod.position.set(
+        entryFaceX - entryNotchD + canopyDepth - 0.1,
+        entryNotchH + 0.1 + (officeH - entryNotchH - 0.1) / 2,
+        entryFaceZ,
+      );
+      worldGroup.add(canopyRod);
+
+      /* STAIR / SERVICES TOWER — taller narrow volume at the
+       * NE corner of the data hall mass. Reads as the elevator
+       * core + stair landing the building actually has, plus it
+       * breaks the silhouette so the building is no longer a
+       * single block. */
+      const towerW = 4.5;
+      const towerD = 4.5;
+      const towerH = BUILDING_HEIGHT * 1.35;
+      const towerOriginX = W / 2 - towerW / 2;
+      const towerOriginZ = D / 2 - towerD / 2;
+
+      const towerShellMat = new THREE.MeshStandardMaterial({
+        color: 0x394048, roughness: 0.6, metalness: 0.35,
+        roughnessMap: proceduralNoiseTexture({ size: 64, scale: 4, seed: 167 }),
+        envMapIntensity: 0.55,
+      });
+      const towerShell = new THREE.Mesh(
+        roundedBox(towerW, towerH, towerD, 0.08),
+        towerShellMat,
+      );
+      towerShell.position.set(towerOriginX, towerH / 2, towerOriginZ);
+      towerShell.castShadow = true;
+      towerShell.receiveShadow = true;
+      worldGroup.add(towerShell);
+
+      /* Tower glass slot — single tall glazed strip on the south
+       * face (towards the data hall) suggesting the stair landing
+       * windows. */
+      const towerSlot = new THREE.Mesh(
+        new THREE.BoxGeometry(0.06, towerH * 0.85, towerD * 0.6),
+        officeGlassMat,
+      );
+      towerSlot.position.set(
+        towerOriginX + towerW / 2 - 0.03,
+        towerH * 0.5,
+        towerOriginZ,
+      );
+      worldGroup.add(towerSlot);
+
+      /* Tower cap — slim chamfered roof crown sitting above the
+       * parapet line. */
+      const towerCap = new THREE.Mesh(
+        roundedBox(towerW + 0.2, 0.4, towerD + 0.2, 0.04),
+        towerShellMat,
+      );
+      towerCap.position.set(towerOriginX, towerH + 0.2, towerOriginZ);
+      worldGroup.add(towerCap);
+
+      /* Tower lightning rod */
+      const towerRod = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.025, 0.04, 1.4, 8),
+        new THREE.MeshStandardMaterial({
+          color: 0xc8cdd4, roughness: 0.4, metalness: 0.85,
+        }),
+      );
+      towerRod.position.set(towerOriginX, towerH + 1.1, towerOriginZ);
+      worldGroup.add(towerRod);
+
+      /* BRAND-COLOR STRIPE — slim mint accent band wrapping the
+       * data-hall cap. Reads as a real branded hyperscaler facade
+       * (think Digital Realty / Equinix coloured trim). */
+      const brandStripeH = 0.18;
+      const brandStripeY = BUILDING_HEIGHT - 0.65;
+      /* North + south edges */
+      const stripeNS = new THREE.Mesh(
+        new THREE.BoxGeometry(W + 0.05, brandStripeH, 0.05),
+        accentStripeMat,
+      );
+      stripeNS.position.set(0, brandStripeY, D / 2 + 0.03);
+      worldGroup.add(stripeNS);
+      const stripeNS2 = stripeNS.clone();
+      stripeNS2.position.set(0, brandStripeY, -D / 2 - 0.03);
+      worldGroup.add(stripeNS2);
+      /* West edge (the +X / east edge is occupied by the office wing) */
+      const stripeEW = new THREE.Mesh(
+        new THREE.BoxGeometry(0.05, brandStripeH, D + 0.05),
+        accentStripeMat,
+      );
+      stripeEW.position.set(-W / 2 - 0.03, brandStripeY, 0);
+      worldGroup.add(stripeEW);
+
+      /* Office-wing has its OWN slim accent stripe at the parapet */
+      const officeStripe = new THREE.Mesh(
+        new THREE.BoxGeometry(officeW + 0.05, 0.12, 0.04),
+        accentStripeMat,
+      );
+      officeStripe.position.set(
+        officeOriginX,
+        officeH - 0.25,
+        officeOriginZ + officeD / 2 + 0.03,
+      );
+      worldGroup.add(officeStripe);
+      const officeStripe2 = officeStripe.clone();
+      officeStripe2.position.set(
+        officeOriginX,
+        officeH - 0.25,
+        officeOriginZ - officeD / 2 - 0.03,
+      );
+      worldGroup.add(officeStripe2);
 
       /* Steel corner pilasters at the building corners — narrow tall
        * columns that read as structural steel. */
@@ -4982,7 +5297,7 @@
       sun.position.y = sunY;
       sunGlowSprite.position.copy(sun.position);
       sunLight.position.copy(sun.position);
-      sunGlowSprite.material.opacity = 0.92 + Math.sin(dt * 0.4) * 0.06;
+      sunGlowSprite.material.opacity = 0.5 + Math.sin(dt * 0.4) * 0.05;
       controls.update();
       renderer.render(scene, camera);
 
