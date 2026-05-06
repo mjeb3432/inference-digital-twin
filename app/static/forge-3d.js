@@ -317,16 +317,338 @@
       return tex;
     }
 
+    /* ============================================================
+     * REALISTIC TREE LIBRARY
+     * ============================================================
+     *
+     * Five procedural species, each built from a Group of trunk +
+     * branches + multi-sphere foliage clusters. The foliage is
+     * non-uniformly scaled IcosahedronGeometry with vertex-noise
+     * displacement so it reads as organic canopy rather than CG
+     * sphere. A tiny CanvasTexture supplies bark detail.
+     *
+     *   PINE   — stacked tapering cones (conifer silhouette)
+     *   OAK    — broad round canopy + visible branch structure
+     *   BIRCH  — tall slim trunk + light sparse canopy
+     *   POPLAR — narrow columnar canopy (Lombardy poplar shape)
+     *   ORN    — ornamental ball-shaped (campus landscaping)
+     *
+     * Every tree returns a Group with userData.swayAxis so the render
+     * loop can apply per-tree wind sway. Total per-tree mesh count
+     * is 8-15; the scene-wide tree count caps at ~40 so the budget
+     * stays under ~600 meshes for the entire forest.
+     */
+
+    const TREE_SPECIES = ["pine", "oak", "birch", "poplar"];
+
+    /* Bark texture — vertical-stripe noise for a tree-bark grain.
+     * Generated once and shared across all trunks. Cheap to compute
+     * (~64×64 RGBA = 16KB) and the visual upgrade vs flat brown is
+     * dramatic. */
+    function makeBarkTexture(barkSeed = 1) {
+      const size = 64;
+      const data = new Uint8Array(size * size * 4);
+      for (let j = 0; j < size; j++) {
+        for (let i = 0; i < size; i++) {
+          /* Vertical stripe noise: emphasise variation along the X
+           * axis, smooth along Y. Multiplied by a brown tint. */
+          const u = i / size;
+          const v = j / size;
+          const n =
+            Math.sin(u * 24 + barkSeed) * 0.5 +
+            Math.sin(u * 7 + v * 3 + barkSeed * 1.3) * 0.3 +
+            Math.sin(u * 47 + v * 0.5 + barkSeed * 2.1) * 0.2;
+          const g = Math.max(0, Math.min(1, 0.5 + n * 0.4));
+          const r = Math.round(80 + g * 60);
+          const gg = Math.round(50 + g * 40);
+          const b = Math.round(28 + g * 22);
+          const idx = (j * size + i) * 4;
+          data[idx] = r;
+          data[idx + 1] = gg;
+          data[idx + 2] = b;
+          data[idx + 3] = 255;
+        }
+      }
+      const tex = new THREE.DataTexture(data, size, size, THREE.RGBAFormat);
+      tex.wrapS = THREE.RepeatWrapping;
+      tex.wrapT = THREE.RepeatWrapping;
+      tex.repeat.set(2, 1);
+      tex.needsUpdate = true;
+      return tex;
+    }
+    const sharedBarkMap = makeBarkTexture(7);
+
+    /* Displaced foliage geometry — IcosahedronGeometry with subtle
+     * per-vertex noise so the canopy reads as organic rather than
+     * a perfect sphere. Cached per detail-level. */
+    const foliageGeoCache = new Map();
+    function getFoliageGeo(detail) {
+      if (foliageGeoCache.has(detail)) return foliageGeoCache.get(detail);
+      const geo = new THREE.IcosahedronGeometry(1, detail);
+      const pos = geo.attributes.position;
+      for (let i = 0; i < pos.count; i++) {
+        const x = pos.getX(i);
+        const y = pos.getY(i);
+        const z = pos.getZ(i);
+        /* Three-octave value noise on the surface. Pushes vertices
+         * outward by ±15% of their unit-radius position. */
+        const n =
+          Math.sin(x * 6.3 + y * 2.1) * 0.06 +
+          Math.sin(y * 5.7 + z * 3.4) * 0.05 +
+          Math.sin(z * 4.9 + x * 7.1) * 0.04;
+        const f = 1 + n;
+        pos.setXYZ(i, x * f, y * f, z * f);
+      }
+      pos.needsUpdate = true;
+      geo.computeVertexNormals();
+      foliageGeoCache.set(detail, geo);
+      return geo;
+    }
+
+    /* Foliage materials — slight variations so neighbouring trees
+     * don't look stamped from the same mould. */
+    const foliagePalettes = {
+      darkPine:    { color: 0x1f4029, emissive: 0x041208 },
+      midPine:     { color: 0x2d5a3a, emissive: 0x051912 },
+      lightPine:   { color: 0x3a6b48, emissive: 0x062014 },
+      springOak:   { color: 0x4a7838, emissive: 0x0a1f10 },
+      summerOak:   { color: 0x3c6a30, emissive: 0x081a0c },
+      birchLeaf:   { color: 0x6b9a4a, emissive: 0x102a14 },
+      poplarLeaf:  { color: 0x5e8a3e, emissive: 0x0c2412 },
+      ornLight:    { color: 0x6da654, emissive: 0x142e1a },
+    };
+    const foliageMatCache = {};
+    function getFoliageMat(key) {
+      if (foliageMatCache[key]) return foliageMatCache[key];
+      const pal = foliagePalettes[key] || foliagePalettes.midPine;
+      foliageMatCache[key] = new THREE.MeshStandardMaterial({
+        color: pal.color,
+        roughness: 0.92,
+        metalness: 0,
+        emissive: pal.emissive,
+        emissiveIntensity: 0.18,
+        flatShading: true, // helps the noise displacement read sharper
+      });
+      return foliageMatCache[key];
+    }
+
+    /* Shared trunk material — bark texture + flat shading kills the
+     * shiny-cylinder look. */
+    const trunkMatShared = new THREE.MeshStandardMaterial({
+      color: 0x6e4a2d,
+      roughness: 0.95,
+      metalness: 0,
+      map: sharedBarkMap,
+    });
+    const trunkMatBirch = new THREE.MeshStandardMaterial({
+      color: 0xd6d2c8,
+      roughness: 0.85,
+      metalness: 0,
+    });
+
+    function buildTree(species, scale = 1, seed = 0) {
+      const tree = new THREE.Group();
+      const rng = (n) => ((Math.sin((seed + n) * 12.9898) * 43758.5453) % 1 + 1) % 1;
+
+      if (species === "pine") {
+        /* Stacked tapering cones — classic conifer */
+        const trunkH = 1.4 * scale;
+        const trunk = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.1 * scale, 0.18 * scale, trunkH, 10),
+          trunkMatShared,
+        );
+        trunk.position.y = trunkH / 2;
+        trunk.castShadow = true;
+        tree.add(trunk);
+
+        const tiers = 3 + Math.floor(rng(1) * 2); // 3 or 4
+        const matKey = ["darkPine", "midPine", "lightPine"][Math.floor(rng(2) * 3)];
+        let coneY = trunkH * 0.78;
+        for (let t = 0; t < tiers; t++) {
+          const tt = t / tiers;
+          const radius = (1.0 - tt * 0.55) * 1.0 * scale;
+          const height = (1.5 - tt * 0.25) * scale;
+          const cone = new THREE.Mesh(
+            new THREE.ConeGeometry(radius, height, 10),
+            getFoliageMat(matKey),
+          );
+          cone.position.y = coneY + height / 2 - 0.18 * scale;
+          cone.rotation.y = rng(t + 5) * Math.PI * 2;
+          cone.castShadow = true;
+          tree.add(cone);
+          coneY += height * 0.55;
+        }
+      } else if (species === "oak") {
+        /* Broad round canopy + visible branching */
+        const trunkH = 1.6 * scale;
+        const trunk = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.13 * scale, 0.22 * scale, trunkH, 10),
+          trunkMatShared,
+        );
+        trunk.position.y = trunkH / 2;
+        trunk.castShadow = true;
+        tree.add(trunk);
+
+        /* 3 branches splaying out from the upper trunk */
+        const branchCount = 3;
+        for (let b = 0; b < branchCount; b++) {
+          const branchAng = (b / branchCount) * Math.PI * 2 + rng(b + 9) * 0.6;
+          const branchLen = 0.7 * scale;
+          const branch = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.045 * scale, 0.075 * scale, branchLen, 6),
+            trunkMatShared,
+          );
+          branch.position.set(
+            Math.cos(branchAng) * 0.18 * scale,
+            trunkH * 0.85,
+            Math.sin(branchAng) * 0.18 * scale,
+          );
+          /* Tilt outward 35° */
+          branch.rotation.z = Math.cos(branchAng) * 0.6;
+          branch.rotation.x = Math.sin(branchAng) * 0.6;
+          tree.add(branch);
+        }
+
+        /* Multi-sphere canopy — 4 overlapping puffs forming a
+         * cumulus-like crown */
+        const matKey = rng(3) > 0.5 ? "summerOak" : "springOak";
+        const foliageGeo = getFoliageGeo(2);
+        const positions = [
+          { x: 0, y: trunkH + 0.7, z: 0, s: 1.05 },
+          { x: 0.55, y: trunkH + 0.55, z: 0.1, s: 0.75 },
+          { x: -0.4, y: trunkH + 0.6, z: 0.4, s: 0.7 },
+          { x: 0.1, y: trunkH + 0.35, z: -0.55, s: 0.65 },
+        ];
+        for (const p of positions) {
+          const puff = new THREE.Mesh(foliageGeo, getFoliageMat(matKey));
+          puff.position.set(p.x * scale, p.y, p.z * scale);
+          const s = p.s * scale * (0.9 + rng(p.x * 31) * 0.2);
+          puff.scale.set(s * 1.05, s * 0.92, s * 1.0);
+          puff.castShadow = true;
+          tree.add(puff);
+        }
+      } else if (species === "birch") {
+        /* Tall slim trunk + sparse light canopy */
+        const trunkH = 2.4 * scale;
+        const trunk = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.07 * scale, 0.11 * scale, trunkH, 8),
+          trunkMatBirch,
+        );
+        trunk.position.y = trunkH / 2;
+        trunk.castShadow = true;
+        tree.add(trunk);
+
+        /* Subtle dark "papery" stripes on the white birch trunk —
+         * thin black dashes spaced randomly along the height. */
+        for (let s = 0; s < 5; s++) {
+          const ringY = trunkH * (0.15 + s * 0.18);
+          const ring = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.075 * scale, 0.1 * scale, 0.05 * scale, 8, 1, true),
+            new THREE.MeshStandardMaterial({
+              color: 0x2a261c, roughness: 0.95,
+            }),
+          );
+          ring.position.y = ringY;
+          tree.add(ring);
+        }
+
+        /* Sparse canopy — 3 small puffs */
+        const foliageGeo = getFoliageGeo(2);
+        for (let p = 0; p < 3; p++) {
+          const puff = new THREE.Mesh(foliageGeo, getFoliageMat("birchLeaf"));
+          const ang = rng(p + 11) * Math.PI * 2;
+          const r = rng(p + 13) * 0.45 * scale;
+          puff.position.set(
+            Math.cos(ang) * r,
+            trunkH + 0.4 + rng(p + 17) * 0.4,
+            Math.sin(ang) * r,
+          );
+          const s = (0.55 + rng(p + 19) * 0.3) * scale;
+          puff.scale.set(s, s * 0.85, s);
+          puff.castShadow = true;
+          tree.add(puff);
+        }
+      } else if (species === "poplar") {
+        /* Narrow columnar canopy — Lombardy poplar shape */
+        const trunkH = 0.6 * scale;
+        const trunk = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.09 * scale, 0.14 * scale, trunkH, 8),
+          trunkMatShared,
+        );
+        trunk.position.y = trunkH / 2;
+        trunk.castShadow = true;
+        tree.add(trunk);
+
+        /* Tall narrow ellipsoid canopy */
+        const foliageGeo = getFoliageGeo(2);
+        const canopy = new THREE.Mesh(foliageGeo, getFoliageMat("poplarLeaf"));
+        const canopyH = 3.2 * scale;
+        canopy.position.y = trunkH + canopyH * 0.5;
+        canopy.scale.set(0.7 * scale, canopyH * 0.5, 0.7 * scale);
+        canopy.castShadow = true;
+        tree.add(canopy);
+      } else {
+        /* Ornamental — small ball-shaped landscaping tree */
+        const trunkH = 0.85 * scale;
+        const trunk = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.08 * scale, 0.12 * scale, trunkH, 8),
+          trunkMatShared,
+        );
+        trunk.position.y = trunkH / 2;
+        trunk.castShadow = true;
+        tree.add(trunk);
+
+        const foliageGeo = getFoliageGeo(2);
+        const ball = new THREE.Mesh(foliageGeo, getFoliageMat("ornLight"));
+        ball.position.y = trunkH + 0.85 * scale;
+        const s = 0.95 * scale;
+        ball.scale.set(s, s * 0.9, s);
+        ball.castShadow = true;
+        tree.add(ball);
+      }
+
+      tree.userData.kind = "tree";
+      tree.userData.swayPhase = (seed * 0.91) % (Math.PI * 2);
+      tree.userData.swayAmp = 0.012 + (seed % 7) * 0.002;
+      return tree;
+    }
+
+    /* Bushes — multi-sphere clumps. Bigger upgrade than the previous
+     * single squashed spheres. */
+    function buildBush(scale = 1, seed = 0) {
+      const bush = new THREE.Group();
+      const rng = (n) => ((Math.sin((seed + n) * 17.137) * 9531.193) % 1 + 1) % 1;
+      const foliageGeo = getFoliageGeo(1);
+      const matKey = rng(1) > 0.5 ? "summerOak" : "ornLight";
+      const puffCount = 3 + Math.floor(rng(2) * 2);
+      for (let p = 0; p < puffCount; p++) {
+        const puff = new THREE.Mesh(foliageGeo, getFoliageMat(matKey));
+        const ang = (p / puffCount) * Math.PI * 2 + rng(p + 7) * 0.4;
+        const r = rng(p + 11) * 0.3 * scale;
+        puff.position.set(
+          Math.cos(ang) * r,
+          0.3 * scale + rng(p + 13) * 0.2 * scale,
+          Math.sin(ang) * r,
+        );
+        const s = (0.5 + rng(p + 17) * 0.2) * scale;
+        puff.scale.set(s, s * 0.7, s);
+        puff.castShadow = true;
+        bush.add(puff);
+      }
+      return bush;
+    }
+
     /* ---------- Renderer + scene ---------- */
     const width = container.clientWidth || 1200;
     const height = container.clientHeight || 720;
 
     const scene = new THREE.Scene();
-    /* Sky-tinted background — slightly warmer than pure black so the
-     * later HDRI swap-in doesn't read as a full reset. Fog still sells
-     * the depth at long viewing angles. */
-    scene.background = new THREE.Color(0x0d1620);
-    scene.fog = new THREE.Fog(0x12202c, 110, 360);
+    /* Daylight sky background — warm hazy horizon tint so the
+     * 3D scene reads as outdoors-noon rather than a dark stage.
+     * Fog matches the horizon hue for proper distance haze
+     * (atmospheric scattering approximation). */
+    scene.background = new THREE.Color(0xc4d3e0);
+    scene.fog = new THREE.Fog(0xc8d0d8, 130, 380);
 
     /* Camera framing — closer to the building, framed slightly
      * UP so the user sees both the data centre AND the sky above
@@ -444,6 +766,50 @@
           /* Silently fall back. Analytic lights remain authoritative. */
         });
     }
+    /* ---------- Lazy PolyHaven texture loader (Path B) ----------
+     * Real PBR textures fetched from PolyHaven's CORS-open CDN AFTER
+     * the scene first paints. Each texture is wired into a target
+     * material's `.map` slot once it lands. If the CDN is unreachable,
+     * the procedural noise-roughness fallback set up earlier remains
+     * authoritative — the scene never breaks.
+     *
+     * Materials we hand off to the upgrader:
+     *   - groundMat  → grass / wild_grass diffuse (rural+campus)
+     *   - yardMat    → asphalt diffuse (gravel hardstanding)
+     *   - slabMat    → polished_concrete diffuse (DC slab)
+     *   - dockPadMat → asphalt diffuse (loading-dock pad)
+     *
+     * We use 1k textures (~600KB diffuse). Total bundle add at
+     * runtime: ~2-3MB across 3 sets, all post-paint. */
+    const pendingTextureUpgrades = [];
+    function queueTextureUpgrade(material, baseUrl, repeat = 4) {
+      if (!material || !baseUrl) return;
+      pendingTextureUpgrades.push({ material, baseUrl, repeat });
+    }
+    function applyPolyHavenTextures() {
+      if (!pendingTextureUpgrades.length) return;
+      const loader = new THREE.TextureLoader();
+      pendingTextureUpgrades.forEach(({ material, baseUrl, repeat }) => {
+        loader.load(
+          baseUrl,
+          (tex) => {
+            tex.wrapS = THREE.RepeatWrapping;
+            tex.wrapT = THREE.RepeatWrapping;
+            tex.repeat.set(repeat, repeat);
+            if ("colorSpace" in tex) tex.colorSpace = THREE.SRGBColorSpace;
+            else if ("encoding" in tex) tex.encoding = THREE.sRGBEncoding;
+            material.map = tex;
+            material.needsUpdate = true;
+          },
+          undefined,
+          () => {
+            /* Silent fallback — procedural roughness map remains the
+             * material's only texture. No console spam. */
+          },
+        );
+      });
+    }
+
     /* Defer HDRI fetch until after the first frame paints so it never
      * blocks initial scene visibility. PMREMGenerator must be created
      * eagerly (cheap) since we need it inside the async callback. */
@@ -453,7 +819,16 @@
       /* Use rAF rather than setTimeout(0) so the first WebGL frame is
        * actually drawn before we kick off the HDRI fetch. */
       window.requestAnimationFrame(() => {
-        window.requestAnimationFrame(() => loadEnvironmentHDRI());
+        window.requestAnimationFrame(() => {
+          loadEnvironmentHDRI();
+          /* PolyHaven ground textures piggyback on the same post-
+           * paint deferral path. */
+          applyPolyHavenTextures();
+        });
+      });
+    } else {
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => applyPolyHavenTextures());
       });
     }
 
@@ -539,36 +914,82 @@
      * banner texture — a slow Easter egg that floats around the
      * scene every ~80s.
      */
-    /* Soft cloud-puff texture — radial gradient so each puff has
-     * feathered edges instead of a hard sphere silhouette. This
-     * single texture is shared across all puffs (every cloud + the
-     * letterforms below) for cheap rendering. */
-    function makeCloudPuffTexture() {
+    /* Volumetric-looking cloud puff texture — multi-octave radial
+     * noise gives each sprite a soft 3D-ish silhouette with bumpy
+     * edges, so a stack of overlapping puffs reads as a real
+     * cumulus volume rather than a flat decal. Two variants
+     * (CORE = bright opaque centre, EDGE = soft transparent
+     * fringe) layered together produce the sun-lit highlight + soft
+     * ambient shadow effect that real clouds have. */
+    function makeCloudPuffTexture(opts = {}) {
+      const {
+        size = 256,
+        coreAlpha = 1.0,
+        rim = 0.85,
+        warmth = 0,        // -1..+1 → cool → warm
+        seed = 0,
+      } = opts;
       const c = document.createElement("canvas");
-      c.width = 256; c.height = 256;
+      c.width = size; c.height = size;
       const x = c.getContext("2d");
-      const g = x.createRadialGradient(128, 128, 8, 128, 128, 122);
-      g.addColorStop(0.00, "rgba(252, 254, 255, 1.00)");
-      g.addColorStop(0.25, "rgba(232, 240, 250, 0.92)");
-      g.addColorStop(0.55, "rgba(200, 215, 232, 0.55)");
-      g.addColorStop(0.85, "rgba(180, 198, 218, 0.18)");
+      /* Layer 1: smooth radial gradient base */
+      const g = x.createRadialGradient(size / 2, size / 2, size * 0.08, size / 2, size / 2, size * 0.5);
+      const top = warmth > 0
+        ? `rgba(${252 + warmth * 3}, ${248 + warmth * -8}, ${235 - warmth * 14}, ${coreAlpha})`
+        : `rgba(${252 - warmth * 4}, ${254 + warmth * -2}, ${255 + warmth * -2}, ${coreAlpha})`;
+      g.addColorStop(0.00, top);
+      g.addColorStop(0.20, `rgba(238, 244, 252, ${coreAlpha * 0.94})`);
+      g.addColorStop(0.45, `rgba(212, 224, 240, ${coreAlpha * 0.6})`);
+      g.addColorStop(0.70, `rgba(186, 200, 218, ${coreAlpha * 0.28})`);
+      g.addColorStop(0.92, `rgba(170, 188, 210, ${coreAlpha * 0.08})`);
       g.addColorStop(1.00, "rgba(170, 188, 210, 0.00)");
       x.fillStyle = g;
-      x.fillRect(0, 0, 256, 256);
+      x.fillRect(0, 0, size, size);
+
+      /* Layer 2: soft noise displacement of the alpha so the
+       * silhouette has bumpy organic edges, not a perfect circle.
+       * Sample sparsely + bilinear-blur at composite time. */
+      const img = x.getImageData(0, 0, size, size);
+      const d = img.data;
+      const noise = (i, j) => {
+        const k = Math.sin(i * 12.9898 + j * 78.233 + seed * 31.7) * 43758.5453;
+        return (k - Math.floor(k));
+      };
+      for (let j = 0; j < size; j++) {
+        for (let i = 0; i < size; i++) {
+          const idx = (j * size + i) * 4;
+          if (d[idx + 3] < 1) continue;
+          const u = i / size; const v = j / size;
+          const cx = u - 0.5; const cy = v - 0.5;
+          const dist = Math.sqrt(cx * cx + cy * cy);
+          /* Higher-frequency bumps near the rim only */
+          const rimWeight = Math.max(0, Math.min(1, (dist - 0.18) * 2.4));
+          const bump =
+            (noise(Math.floor(i / 4), Math.floor(j / 4)) - 0.5) * 0.5 +
+            (noise(Math.floor(i / 12), Math.floor(j / 12)) - 0.5) * 0.5;
+          const factor = 1 - rimWeight * (1 - rim) * bump;
+          d[idx + 3] = Math.max(0, Math.min(255, d[idx + 3] * factor));
+        }
+      }
+      x.putImageData(img, 0, 0);
+
       const tex = new THREE.CanvasTexture(c);
       tex.minFilter = THREE.LinearFilter;
       tex.magFilter = THREE.LinearFilter;
       return tex;
     }
-    const cloudPuffTexture = makeCloudPuffTexture();
+    const cloudPuffTexCore = makeCloudPuffTexture({ size: 256, coreAlpha: 1.0, warmth: 0.3, seed: 11 });
+    const cloudPuffTexShadow = makeCloudPuffTexture({ size: 256, coreAlpha: 0.55, warmth: -0.7, seed: 23 });
 
-    /* A single cloud = a Group of sprite-based puffs. Each sprite
-     * always faces the camera so the cloud reads as soft 2D puffs
-     * even at orbit angles where 3D spheres would look like beads. */
-    function makePuff(scale, opacity) {
+    /* A single cloud = a Group of sprite-based puffs at varying
+     * depths, sizes, and tints. Each sprite always faces the camera
+     * so the cloud reads as a soft volumetric mass even at orbit
+     * angles. The "shadow" puffs sit slightly below + behind the
+     * "core" puffs to suggest sun-from-above lighting. */
+    function makePuff(scale, opacity, tex = cloudPuffTexCore) {
       const sprite = new THREE.Sprite(
         new THREE.SpriteMaterial({
-          map: cloudPuffTexture, transparent: true,
+          map: tex, transparent: true,
           opacity: opacity, depthWrite: false,
         })
       );
@@ -577,29 +998,60 @@
     }
 
     const clouds = [];
-    const CLOUD_COUNT = 14;
+    const CLOUD_COUNT = 16;
     for (let c = 0; c < CLOUD_COUNT; c++) {
       const cloud = new THREE.Group();
-      /* 5-8 overlapping puffs per cloud — wider than they are tall,
-       * a few smaller "tufts" stacked on top for the cumulus feel. */
-      const baseW = 14 + (c % 3) * 4;
-      const baseH = 6 + (c % 2) * 2;
-      const puffCount = 5 + (c % 4);
+      /* 8-12 overlapping puffs per cloud (was 5-8) — denser core
+       * gives a real volumetric mass, while a few outlier "tufts"
+       * stretch the silhouette into a cumulus shape. */
+      const baseW = 16 + (c % 3) * 5;
+      const baseH = 7 + (c % 2) * 2.5;
+      const puffCount = 9 + (c % 4);
+
+      /* Bottom-shadow puff layer — slightly larger, darker, sits
+       * below the core puffs so the cloud reads as having a sunlit
+       * top and shadowed underside. */
+      const shadowCount = 4 + (c % 3);
+      for (let p = 0; p < shadowCount; p++) {
+        const t = p / Math.max(1, shadowCount - 1);
+        const px = (t - 0.5) * baseW * 1.1;
+        const py = -1.5 - ((p * 5) % 3) * 0.4;
+        const pscale = 9 + Math.sin(t * Math.PI) * 7 + ((c + p) % 3) * 1.0;
+        const puff = makePuff(pscale, 0.55, cloudPuffTexShadow);
+        puff.position.set(px, py, ((p * 0.7) % 2.0) - 1.0);
+        cloud.add(puff);
+      }
+
+      /* Core puff layer — the bright sun-lit top of the cloud */
       for (let p = 0; p < puffCount; p++) {
         const t = p / Math.max(1, puffCount - 1);
         /* Lay puffs along a slight arc so the silhouette has a
          * cumulus-style hump in the middle, lower on the edges. */
         const px = (t - 0.5) * baseW * (1.3 + (c % 2) * 0.2);
-        const py = Math.sin(t * Math.PI) * baseH * 0.8 + ((p * 7) % 3) * 0.4;
-        const pscale = 8 + Math.sin(t * Math.PI) * 6 + ((c + p) % 3) * 0.8;
-        cloud.add(makePuff(pscale, 0.78 - (p % 3) * 0.05));
+        const py = Math.sin(t * Math.PI) * baseH * 0.85 + ((p * 7) % 3) * 0.4;
+        const pscale = 8 + Math.sin(t * Math.PI) * 6.5 + ((c + p) % 4) * 0.9;
+        cloud.add(makePuff(pscale, 0.82 - (p % 3) * 0.06));
         const last = cloud.children[cloud.children.length - 1];
         last.position.set(px, py, ((p * 0.7) % 2.2) - 1.0);
       }
+
+      /* Top-highlight tufts — small bright puffs on top of the
+       * cumulus hump for the bright sunlit cap. */
+      const tuftCount = 2 + (c % 3);
+      for (let p = 0; p < tuftCount; p++) {
+        const t = (p + 0.5) / tuftCount;
+        const px = (t - 0.5) * baseW * 0.6;
+        const py = baseH * 0.7 + ((p * 3) % 2) * 0.3;
+        const pscale = 5 + ((c + p) % 3) * 1.5;
+        const puff = makePuff(pscale, 0.92);
+        puff.position.set(px, py, ((p * 0.4) % 1.4) - 0.7);
+        cloud.add(puff);
+      }
+
       const angle0 = (c / CLOUD_COUNT) * Math.PI * 2 + (c * 0.31);
       const radius = 110 + (c * 13) % 90;
       const altitude = 28 + (c * 4.1) % 22;
-      const speed = 0.018 + (c % 4) * 0.006; // rad/s
+      const speed = 0.014 + (c % 4) * 0.005; // rad/s — slightly slower
       cloud.userData = { angle: angle0, radius, altitude, speed };
       cloud.position.set(
         Math.cos(angle0) * radius,
@@ -691,18 +1143,19 @@
     scene.add(teaser);
     clouds.push(teaser); // share the orbit-update logic
 
-    /* Skybox-like sphere — gives a subtle horizon gradient instead
-     * of a flat black background. Inside-out box with a vertical
-     * gradient material. */
+    /* Skybox-like sphere — gives a subtle horizon gradient. Daylight
+     * palette: zenith deep-blue, horizon warm hazy off-white so the
+     * cumulus clouds + sun read as a real sky rather than a stage
+     * backdrop. Inside-out sphere with a vertical gradient. */
     const skyGeo = new THREE.SphereGeometry(420, 24, 18);
     const skyMat = new THREE.ShaderMaterial({
       side: THREE.BackSide,
       depthWrite: false,
       uniforms: {
-        topColor:    { value: new THREE.Color(0x05080d) },
-        bottomColor: { value: new THREE.Color(0x10202c) },
-        offset:      { value: 30 },
-        exponent:    { value: 0.7 },
+        topColor:    { value: new THREE.Color(0x3b6f9c) },
+        bottomColor: { value: new THREE.Color(0xe2dccd) },
+        offset:      { value: 80 },
+        exponent:    { value: 0.55 },
       },
       vertexShader: `
         varying vec3 vWorldPosition;
@@ -737,16 +1190,27 @@
     /* ---------- Site / context ground ---------- */
     /* Site colour palette varies with location type so the user
      * immediately sees the difference between a greenfield rural
-     * facility (green grass), an urban-edge campus (concrete + adjacent
-     * city blocks), a repurposed industrial site (warm brick tones),
-     * and a campus-adjacent (pale cement). */
+     * facility (green grass), an urban-edge campus (asphalt +
+     * adjacent city blocks), a repurposed industrial site (warm
+     * brown tones), and a campus-adjacent (pale concrete).
+     * Daylight-tuned: under the new sky shader the ground reads
+     * as midday-lit rather than a dark backdrop. */
     const SITE_PALETTES = {
-      rural:     { ground: 0x142822, setback: 0x1f3a31 },
-      urban:     { ground: 0x1a1d22, setback: 0x282d35 },
-      repurpose: { ground: 0x2a2018, setback: 0x3a2c20 },
-      campus:    { ground: 0x1f2326, setback: 0x2a3034 },
+      rural:     { ground: 0x4a6e3a, setback: 0x5a8048, kind: "grass" },
+      urban:     { ground: 0x5a6068, setback: 0x6c7280, kind: "asphalt" },
+      repurpose: { ground: 0x7a5a3e, setback: 0x8a6a4a, kind: "asphalt" },
+      campus:    { ground: 0x6e7176, setback: 0x80848a, kind: "concrete" },
     };
     const sitePal = SITE_PALETTES[locationType] || SITE_PALETTES.rural;
+
+    /* PolyHaven CDN URLs for the diffuse-only PBR textures.
+     * 1k JPG ≈ 600KB each, post-paint, lazy-loaded. */
+    const POLYHAVEN_TEX = {
+      grass:    "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/aerial_grass_rock/aerial_grass_rock_diff_1k.jpg",
+      asphalt:  "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/asphalt_02/asphalt_02_diff_1k.jpg",
+      concrete: "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/concrete_floor_02/concrete_floor_02_diff_1k.jpg",
+      gravel:   "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/aerial_beach_01/aerial_beach_01_diff_1k.jpg",
+    };
 
     if (plan.site) {
       const [sx, , sz] = svgToWorld(plan.site.x + plan.site.w / 2, plan.site.y + plan.site.h / 2);
@@ -763,34 +1227,46 @@
       const groundH = Math.max(sw(plan.site.h) + 60, sw(plan.site.h) * 1.4);
       const groundGeo = new THREE.BoxGeometry(groundW, 0.18, groundH);
       const groundMat = new THREE.MeshStandardMaterial({
-        color: 0x0c1218, roughness: 0.96, metalness: 0.0,
+        color: 0x4a523c, roughness: 0.96, metalness: 0.0,
+        roughnessMap: proceduralNoiseTexture({ size: 64, scale: 12, seed: 113 }),
       });
       const groundMesh = new THREE.Mesh(groundGeo, groundMat);
       groundMesh.position.set(0, -0.9, 0);
       groundMesh.receiveShadow = true;
       worldGroup.add(groundMesh);
+      /* Outer ground gets a subtle wild-grass texture (rural-ish
+       * even in urban builds — represents the parcel surroundings). */
+      queueTextureUpgrade(groundMat, POLYHAVEN_TEX.grass, 16);
 
       /* Site (parcel) plate — the "owned" land inside the fence line. */
       const siteGeo = new THREE.BoxGeometry(sw(plan.site.w), 0.2, sw(plan.site.h));
       const siteMat = new THREE.MeshStandardMaterial({
         color: sitePal.ground, roughness: 0.95, metalness: 0.0,
+        roughnessMap: proceduralNoiseTexture({ size: 64, scale: 8, seed: 119 }),
       });
       const siteMesh = new THREE.Mesh(siteGeo, siteMat);
       siteMesh.position.set(sx, -0.5, sz);
       siteMesh.receiveShadow = true;
       worldGroup.add(siteMesh);
+      /* Choose the right texture for the site palette kind. */
+      const siteTex = sitePal.kind === "grass" ? POLYHAVEN_TEX.grass
+        : sitePal.kind === "asphalt" ? POLYHAVEN_TEX.asphalt
+        : POLYHAVEN_TEX.concrete;
+      queueTextureUpgrade(siteMat, siteTex, 8);
 
-      /* Setback band — slightly inset, lighter green */
+      /* Setback band — slightly inset, lighter palette */
       const setW = sw(plan.site.w - plan.site.setback * 2);
       const setH = sw(plan.site.h - plan.site.setback * 2);
       const setGeo = new THREE.BoxGeometry(setW, 0.1, setH);
       const setMat = new THREE.MeshStandardMaterial({
         color: sitePal.setback, roughness: 0.95, metalness: 0.0,
+        roughnessMap: proceduralNoiseTexture({ size: 64, scale: 8, seed: 127 }),
       });
       const setMesh = new THREE.Mesh(setGeo, setMat);
       setMesh.position.set(sx, -0.4, sz);
       setMesh.receiveShadow = true;
       worldGroup.add(setMesh);
+      queueTextureUpgrade(setMat, siteTex, 6);
 
       /* A separate gravel pad to the WEST of the parcel — this is
        * where the outdoor power yard sits. Gives the equipment a
@@ -801,12 +1277,14 @@
       const yardX_world = -sw(plan.site.w) * 0.5 - yardOffset * 0.5;
       const yardGeo = new THREE.BoxGeometry(yardW, 0.16, yardH);
       const yardMat = new THREE.MeshStandardMaterial({
-        color: 0x1a1f24, roughness: 0.95, metalness: 0.05,
+        color: 0x747a82, roughness: 0.95, metalness: 0.05,
+        roughnessMap: proceduralNoiseTexture({ size: 64, scale: 6, seed: 131 }),
       });
       const yardPad = new THREE.Mesh(yardGeo, yardMat);
       yardPad.position.set(yardX_world, -0.42, 0);
       yardPad.receiveShadow = true;
       worldGroup.add(yardPad);
+      queueTextureUpgrade(yardMat, POLYHAVEN_TEX.gravel, 6);
 
       /* Connecting access road from the parcel to the yard pad —
        * narrow concrete strip so it reads as utility infrastructure. */
@@ -819,172 +1297,508 @@
       road.receiveShadow = true;
       worldGroup.add(road);
 
+      /* Tree scatter array — populated per location type below.
+       * Ref'd by the wind-sway loop after the main tick block. */
+      const sceneTrees = [];
+
       /* Location-specific surroundings */
       if (locationType === "rural") {
-        /* Realistic conifer trees — each tree is a stack of progressively
-         * smaller cones (suggests layered branches) with a thicker
-         * tapered trunk + base flare. Sizes vary per-tree so the
-         * perimeter doesn't read as a regular pattern. Two foliage
-         * tints alternate (deeper green vs lighter mint) for variety. */
-        const trunkMat = new THREE.MeshStandardMaterial({ color: 0x3d2615, roughness: 0.95, metalness: 0 });
-        const foliageMatA = new THREE.MeshStandardMaterial({ color: 0x1f4029, roughness: 0.9 });
-        const foliageMatB = new THREE.MeshStandardMaterial({ color: 0x2d5a3a, roughness: 0.9 });
-        const foliageMatC = new THREE.MeshStandardMaterial({ color: 0x365e3f, roughness: 0.9 });
-        const foliageMats = [foliageMatA, foliageMatB, foliageMatC];
-
-        const treeCount = 30;
+        /* Mixed forest perimeter — pine + oak + birch + poplar in
+         * a wider organic ring so the boundary reads as natural
+         * woodland, not a regular plantation. Sizes vary per-tree
+         * for the small-sapling-to-mature-tree variation real
+         * forests have. */
+        const treeCount = 38;
         for (let i = 0; i < treeCount; i++) {
-          /* Distribute trees in a wider organic ring with random
-           * jitter so the perimeter looks natural, not algorithmic. */
           const ang = (i / treeCount) * Math.PI * 2 + (i * 0.137) % 1.0;
           const baseR = Math.max(sw(plan.site.w), sw(plan.site.h)) * 0.42;
-          const r = baseR + ((i * 7) % 11) * 0.4;
+          /* Wider radial jitter so trees don't sit on a perfect
+           * circle — real forests have layered density. */
+          const r = baseR + ((i * 7) % 13) * 0.45 + (i % 5) * 0.3;
           const tx = sx + Math.cos(ang) * r;
           const tz = sz + Math.sin(ang) * r;
-          /* Vary scale so we get small saplings and tall mature pines */
-          const scale = 0.65 + ((i * 0.31) % 0.85);
-          const foliageMat = foliageMats[i % foliageMats.length];
-
-          const treeGroup = new THREE.Group();
-          treeGroup.position.set(tx, 0, tz);
-          /* Random rotation so trees don't all face the same way */
-          treeGroup.rotation.y = (i * 0.917) % (Math.PI * 2);
-
-          /* Trunk: thicker base + tapered top */
-          const trunkH = 1.3 * scale;
-          const trunk = new THREE.Mesh(
-            new THREE.CylinderGeometry(0.12 * scale, 0.18 * scale, trunkH, 8),
-            trunkMat
-          );
-          trunk.position.y = trunkH / 2;
-          trunk.castShadow = true;
-          treeGroup.add(trunk);
-
-          /* Three layered cone tiers — base wider, top tighter */
-          const tiers = 3 + (i % 2); // 3 or 4 tiers
-          let coneY = trunkH;
-          for (let t = 0; t < tiers; t++) {
-            const tierT = t / tiers;
-            const radius = (1.0 - tierT * 0.55) * 0.95 * scale;
-            const height = (1.4 - tierT * 0.25) * scale;
-            const cone = new THREE.Mesh(
-              new THREE.ConeGeometry(radius, height, 8),
-              foliageMat
-            );
-            cone.position.y = coneY + height / 2 - 0.18 * scale;
-            cone.castShadow = true;
-            treeGroup.add(cone);
-            coneY += height * 0.55;
-          }
-          worldGroup.add(treeGroup);
+          const scale = 0.7 + ((i * 0.31) % 0.85);
+          /* Species mix: 55% pine, 25% oak, 12% birch, 8% poplar.
+           * Roughly matches a North-American mixed-conifer forest. */
+          const sp = i % 20;
+          const species = sp < 11 ? "pine"
+            : sp < 16 ? "oak"
+            : sp < 18 ? "birch"
+            : "poplar";
+          const tree = buildTree(species, scale, i * 7 + 3);
+          tree.position.set(tx, 0, tz);
+          tree.rotation.y = (i * 0.917) % (Math.PI * 2);
+          worldGroup.add(tree);
+          sceneTrees.push(tree);
         }
 
-        /* Scatter a few rounded "bushes" near the building entrance
-         * so the plant-life feels designed, not just perimeter-only. */
-        const bushMat = new THREE.MeshStandardMaterial({ color: 0x2a4d33, roughness: 0.95 });
-        for (let i = 0; i < 6; i++) {
+        /* Multi-puff bushes near the building entrance — the
+         * landscaping read of a designed entry plaza. */
+        for (let i = 0; i < 8; i++) {
           const bx = sx + ((i % 3) - 1) * 8 + (i * 1.7);
           const bz = sz + sw(plan.site.h) * 0.32 + (i % 2 === 0 ? -1.4 : 1.4);
-          const bush = new THREE.Mesh(new THREE.SphereGeometry(0.65 + (i * 0.11) % 0.4, 8, 6), bushMat);
-          bush.position.set(bx, 0.4, bz);
-          bush.scale.set(1, 0.7, 1);
-          bush.castShadow = true;
+          const bush = buildBush(0.85 + (i * 0.11) % 0.5, i * 11 + 5);
+          bush.position.set(bx, 0, bz);
           worldGroup.add(bush);
         }
       } else if (locationType === "urban") {
-        /* A grid of low neighbouring building blocks tilted around the
-         * site so the campus sits inside a city fabric. Pure decoration
-         * — not part of the facility plan. */
-        const blockMat = new THREE.MeshStandardMaterial({ color: 0x222831, roughness: 0.7, metalness: 0.15 });
-        const blockEdge = new THREE.LineBasicMaterial({ color: 0x3a4250 });
+        /* Detailed neighbouring city blocks — each is a real
+         * mid-rise commercial building rather than a flat box.
+         * Each prefab includes:
+         *   - Shell with chamfered roof line
+         *   - Procedural window-grid texture (lit windows at varying
+         *     intensity for an evening-city feel)
+         *   - Roof HVAC equipment cluster
+         *   - Parapet edge
+         *   - Antenna/satellite on every 4th building
+         */
+
+        /* Window-grid texture — generated once, reused on every
+         * building face. Procedural so every building reads as a
+         * dense grid of office windows. */
+        function makeWindowGridTexture(cols = 10, rows = 16, seed = 0) {
+          const c = document.createElement("canvas");
+          c.width = 256; c.height = 512;
+          const x = c.getContext("2d");
+          /* Dark base */
+          x.fillStyle = "#181d24";
+          x.fillRect(0, 0, 256, 512);
+          /* Mortar/structure lines */
+          x.fillStyle = "#0c1015";
+          for (let i = 0; i <= cols; i++) x.fillRect((i * 256) / cols - 1, 0, 2, 512);
+          for (let j = 0; j <= rows; j++) x.fillRect(0, (j * 512) / rows - 1, 256, 2);
+          /* Window pane brightness — pseudo-random; some lit, some dark */
+          for (let j = 0; j < rows; j++) {
+            for (let i = 0; i < cols; i++) {
+              const r = Math.sin((i * 12.9898 + j * 78.233 + seed) * 0.7) * 0.5 + 0.5;
+              const lit = r > 0.42;
+              const warm = r > 0.78;
+              if (lit) {
+                const a = warm ? "rgba(255, 215, 140, 0.85)" : "rgba(170, 200, 230, 0.55)";
+                x.fillStyle = a;
+                const px = (i * 256) / cols + 4;
+                const py = (j * 512) / rows + 3;
+                const pw = 256 / cols - 8;
+                const ph = 512 / rows - 6;
+                x.fillRect(px, py, pw, ph);
+              }
+            }
+          }
+          const tex = new THREE.CanvasTexture(c);
+          tex.wrapS = THREE.RepeatWrapping;
+          tex.wrapT = THREE.RepeatWrapping;
+          return tex;
+        }
+
         const cityR = Math.max(sw(plan.site.w), sw(plan.site.h)) * 0.55;
-        const blockCount = 12;
+        const blockCount = 14;
+        const concreteMat = new THREE.MeshStandardMaterial({
+          color: 0x4a525d, roughness: 0.85, metalness: 0.15,
+          roughnessMap: proceduralNoiseTexture({ size: 64, scale: 4, seed: 91 }),
+        });
+        const parapetMat = new THREE.MeshStandardMaterial({
+          color: 0x6a747f, roughness: 0.7, metalness: 0.3,
+        });
+        const hvacMat = new THREE.MeshStandardMaterial({
+          color: 0x3d464f, roughness: 0.6, metalness: 0.5,
+        });
+        const antennaMat = new THREE.MeshStandardMaterial({
+          color: 0xc0c8d0, roughness: 0.4, metalness: 0.85,
+        });
+
         for (let i = 0; i < blockCount; i++) {
           const ang = (i / blockCount) * Math.PI * 2 + 0.2;
           const r = cityR + (i % 3) * 4;
-          const bw = 4 + (i % 3) * 1.5;
-          const bh = 6 + (i * 1.7) % 12;
-          const bd = 4 + ((i * 2) % 3) * 1.4;
+          const bw = 5 + (i % 3) * 1.5;
+          const bh = 7 + (i * 1.7) % 14;
+          const bd = 5 + ((i * 2) % 3) * 1.4;
           const bx = sx + Math.cos(ang) * r;
           const bz = sz + Math.sin(ang) * r;
-          const block = new THREE.Mesh(new THREE.BoxGeometry(bw, bh, bd), blockMat);
-          block.position.set(bx, bh / 2 - 0.4, bz);
-          block.castShadow = true;
-          block.receiveShadow = true;
-          worldGroup.add(block);
-          const edges = new THREE.LineSegments(new THREE.EdgesGeometry(block.geometry), blockEdge);
-          edges.position.copy(block.position);
-          worldGroup.add(edges);
+
+          const blockGroup = new THREE.Group();
+          blockGroup.position.set(bx, 0, bz);
+          /* Slight rotation so blocks are loosely aligned to the
+           * site, not orthogonal to it (cities rarely line up that
+           * way relative to the facility). */
+          blockGroup.rotation.y = ang + Math.PI / 2 + (i * 0.13);
+
+          /* Window-grid material per building — sample with varied
+           * tile counts so towers don't all read the same. */
+          const cols = 6 + (i % 4);
+          const rows = Math.max(8, Math.floor(bh * 1.6));
+          const winMat = new THREE.MeshStandardMaterial({
+            color: 0xf0f0f0,
+            roughness: 0.4,
+            metalness: 0.2,
+            map: makeWindowGridTexture(cols, rows, i * 13 + 1),
+            emissive: 0xfff0d0,
+            emissiveIntensity: 0.25,
+            emissiveMap: null,
+          });
+          /* Reuse the window-grid as emissive too so lit panes
+           * actually glow — emissiveMap shares the same image. */
+          winMat.emissiveMap = winMat.map;
+
+          /* Tower shell — separate top cap so we can mount roof eqpt */
+          const shell = new THREE.Mesh(
+            roundedBox(bw, bh, bd, 0.06),
+            [winMat, winMat, concreteMat, concreteMat, winMat, winMat],
+          );
+          /* The above material array is a fallback; for simplicity
+           * use the window material for ALL faces (top is hidden by
+           * roof equipment below). */
+          shell.material = winMat;
+          shell.position.y = bh / 2;
+          shell.castShadow = true;
+          shell.receiveShadow = true;
+          blockGroup.add(shell);
+
+          /* Parapet — thin band around the roof edge */
+          const parapet = new THREE.Mesh(
+            new THREE.BoxGeometry(bw + 0.1, 0.35, bd + 0.1),
+            parapetMat,
+          );
+          parapet.position.y = bh + 0.18;
+          blockGroup.add(parapet);
+
+          /* Roof HVAC cluster — 2-3 condenser units */
+          const hvacCount = 2 + (i % 2);
+          for (let h = 0; h < hvacCount; h++) {
+            const hvac = new THREE.Mesh(
+              roundedBox(0.9, 0.45, 0.7, 0.04),
+              hvacMat,
+            );
+            hvac.position.set(
+              -bw * 0.25 + h * (bw * 0.25),
+              bh + 0.6,
+              -bd * 0.2,
+            );
+            blockGroup.add(hvac);
+            /* Fan grille on top */
+            const grille = new THREE.Mesh(
+              new THREE.TorusGeometry(0.22, 0.025, 6, 16),
+              antennaMat,
+            );
+            grille.rotation.x = Math.PI / 2;
+            grille.position.set(
+              -bw * 0.25 + h * (bw * 0.25),
+              bh + 0.85,
+              -bd * 0.2,
+            );
+            blockGroup.add(grille);
+          }
+
+          /* Every 4th building gets an antenna or satellite */
+          if (i % 4 === 0) {
+            const mast = new THREE.Mesh(
+              new THREE.CylinderGeometry(0.04, 0.04, 1.6, 6),
+              antennaMat,
+            );
+            mast.position.set(bw * 0.3, bh + 1.0, bd * 0.25);
+            blockGroup.add(mast);
+            /* Cross arms */
+            for (let a = 0; a < 3; a++) {
+              const arm = new THREE.Mesh(
+                new THREE.BoxGeometry(0.45 - a * 0.08, 0.025, 0.025),
+                antennaMat,
+              );
+              arm.position.set(bw * 0.3, bh + 1.4 - a * 0.32, bd * 0.25);
+              blockGroup.add(arm);
+            }
+          } else if (i % 5 === 0) {
+            /* Dish */
+            const dish = new THREE.Mesh(
+              new THREE.SphereGeometry(0.32, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2.2),
+              antennaMat,
+            );
+            dish.rotation.x = -0.3;
+            dish.position.set(bw * 0.25, bh + 0.55, bd * 0.3);
+            blockGroup.add(dish);
+          }
+
+          worldGroup.add(blockGroup);
+        }
+
+        /* Even urban scenes get a few street trees along the
+         * approach — gives the city blocks an "urban canopy" feel. */
+        const urbanTreeCount = 8;
+        for (let i = 0; i < urbanTreeCount; i++) {
+          const ang = (i / urbanTreeCount) * Math.PI * 2 + 0.5;
+          const r = cityR * 0.7;
+          const tx = sx + Math.cos(ang) * r;
+          const tz = sz + Math.sin(ang) * r;
+          const tree = buildTree("ornamental", 0.7 + (i % 3) * 0.12, i * 13 + 17);
+          tree.position.set(tx, 0, tz);
+          worldGroup.add(tree);
+          sceneTrees.push(tree);
         }
       } else if (locationType === "repurpose") {
-        /* Repurposed industrial site — disused brick smokestacks + a
-         * couple of derelict warehouse blocks + rust-toned ground
-         * patches. Conveys "former industrial use, now retrofitted". */
-        const stackMat = new THREE.MeshStandardMaterial({ color: 0x4a2a1a, roughness: 0.9 });
+        /* Repurposed industrial site — brick smokestacks + tilt-up
+         * concrete warehouse buildings with loading bays + roof
+         * monitor sawtooths + scattered shrubs growing through
+         * cracked pavement. Reads as "former industrial, retrofitted". */
+        const brickMat = new THREE.MeshStandardMaterial({
+          color: 0x6a3a25, roughness: 0.9, metalness: 0.05,
+          roughnessMap: proceduralNoiseTexture({ size: 64, scale: 6, seed: 73 }),
+        });
+        const stackBandMat = new THREE.MeshStandardMaterial({
+          color: 0x3a2014, roughness: 0.85, metalness: 0.1,
+        });
+
+        /* Brick smokestacks — taller, with banded relief and
+         * service ladders. Three stacks of varying heights. */
         for (let i = 0; i < 3; i++) {
           const ang = -1 + i * 1.4;
           const r = Math.max(sw(plan.site.w), sw(plan.site.h)) * 0.42;
           const tx = sx + Math.cos(ang) * r;
           const tz = sz + Math.sin(ang) * r;
-          const stack = new THREE.Mesh(new THREE.CylinderGeometry(0.4 + i * 0.1, 0.55, 7.0 + i * 1.5, 10), stackMat);
-          stack.position.set(tx, (7.0 + i * 1.5) / 2, tz);
-          stack.castShadow = true;
-          worldGroup.add(stack);
+          const stackH = 8.0 + i * 2;
+          /* Three-section tapered cylinder: base, mid, top */
+          const stackBase = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.55, 0.7, stackH * 0.55, 14),
+            brickMat,
+          );
+          stackBase.position.set(tx, stackH * 0.275, tz);
+          stackBase.castShadow = true;
+          worldGroup.add(stackBase);
+
+          const stackMid = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.45, 0.55, stackH * 0.35, 14),
+            brickMat,
+          );
+          stackMid.position.set(tx, stackH * 0.55 + stackH * 0.175, tz);
+          stackMid.castShadow = true;
+          worldGroup.add(stackMid);
+
+          const stackTop = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.4, 0.45, stackH * 0.1, 14),
+            stackBandMat,
+          );
+          stackTop.position.set(tx, stackH * 0.95, tz);
+          worldGroup.add(stackTop);
+
+          /* Decorative band rings */
+          for (let b = 0; b < 3; b++) {
+            const band = new THREE.Mesh(
+              new THREE.TorusGeometry(0.6 - b * 0.05, 0.04, 6, 16),
+              stackBandMat,
+            );
+            band.rotation.x = Math.PI / 2;
+            band.position.set(tx, stackH * (0.18 + b * 0.18), tz);
+            worldGroup.add(band);
+          }
+
+          /* Service ladder cage on one side */
+          for (let r = 0; r < 6; r++) {
+            const rung = new THREE.Mesh(
+              new THREE.BoxGeometry(0.18, 0.02, 0.025),
+              stackBandMat,
+            );
+            rung.position.set(tx + 0.62, 0.4 + r * 1.0, tz);
+            worldGroup.add(rung);
+          }
         }
-        /* Derelict warehouse blocks */
+
+        /* Tilt-up warehouse buildings with sawtooth roof monitors —
+         * a classic 60s-90s industrial silhouette. */
         const warehouseMat = new THREE.MeshStandardMaterial({
-          color: 0x4a3522, roughness: 0.95, metalness: 0.05,
+          color: 0x6e5544, roughness: 0.92, metalness: 0.08,
+          roughnessMap: proceduralNoiseTexture({ size: 64, scale: 5, seed: 79 }),
         });
-        const warehouseEdge = new THREE.LineBasicMaterial({ color: 0x6e5238 });
+        const warehouseSeamMat = new THREE.MeshStandardMaterial({
+          color: 0x3a2c20, roughness: 0.85,
+        });
         const positions = [
-          { x: sx - sw(plan.site.w) * 0.45, z: sz + sw(plan.site.h) * 0.35, w: 8, h: 5, d: 12 },
-          { x: sx + sw(plan.site.w) * 0.42, z: sz - sw(plan.site.h) * 0.38, w: 14, h: 4, d: 8 },
+          { x: sx - sw(plan.site.w) * 0.45, z: sz + sw(plan.site.h) * 0.35, w: 10, h: 5, d: 14 },
+          { x: sx + sw(plan.site.w) * 0.42, z: sz - sw(plan.site.h) * 0.38, w: 14, h: 4, d: 9 },
         ];
-        positions.forEach((p) => {
-          const wh = new THREE.Mesh(new THREE.BoxGeometry(p.w, p.h, p.d), warehouseMat);
-          wh.position.set(p.x, p.h / 2, p.z);
-          wh.castShadow = true;
+        positions.forEach((p, idx) => {
+          const wh = new THREE.Group();
+          wh.position.set(p.x, 0, p.z);
+
+          /* Main shell */
+          const shell = new THREE.Mesh(
+            roundedBox(p.w, p.h, p.d, 0.06),
+            warehouseMat,
+          );
+          shell.position.y = p.h / 2;
+          shell.castShadow = true;
+          shell.receiveShadow = true;
+          wh.add(shell);
+
+          /* Sawtooth roof — series of triangular monitors angled
+           * north for daylighting (the classic factory silhouette) */
+          const teeth = Math.max(3, Math.floor(p.d / 3));
+          const toothW = p.d / teeth;
+          for (let s = 0; s < teeth; s++) {
+            const toothShape = new THREE.Shape();
+            toothShape.moveTo(0, 0);
+            toothShape.lineTo(toothW, 0);
+            toothShape.lineTo(0, 0.85);
+            toothShape.lineTo(0, 0);
+            const toothGeo = new THREE.ExtrudeGeometry(toothShape, {
+              depth: p.w - 0.4,
+              bevelEnabled: false,
+            });
+            toothGeo.translate(-(p.w - 0.4) / 2, 0, 0);
+            toothGeo.rotateY(Math.PI / 2);
+            const tooth = new THREE.Mesh(toothGeo, warehouseMat);
+            tooth.position.set(0, p.h, -p.d / 2 + s * toothW);
+            tooth.castShadow = true;
+            wh.add(tooth);
+            /* Glass face on the angled side */
+            const glassGeo = new THREE.PlaneGeometry(p.w - 0.4, 1.05);
+            const glassMat = new THREE.MeshStandardMaterial({
+              color: 0xa6c4d6, roughness: 0.25, metalness: 0.75,
+              transparent: true, opacity: 0.55,
+            });
+            const glass = new THREE.Mesh(glassGeo, glassMat);
+            glass.position.set(0, p.h + 0.45, -p.d / 2 + s * toothW + toothW * 0.05);
+            glass.rotation.x = -Math.atan2(0.85, toothW) + Math.PI;
+            glass.rotation.y = -Math.PI / 2;
+            wh.add(glass);
+          }
+
+          /* Loading bay door (one side) */
+          const door = new THREE.Mesh(
+            new THREE.BoxGeometry(p.w * 0.32, p.h * 0.7, 0.04),
+            warehouseSeamMat,
+          );
+          door.position.set(0, p.h * 0.35, p.d / 2 + 0.02);
+          wh.add(door);
+
           worldGroup.add(wh);
-          const e = new THREE.LineSegments(new THREE.EdgesGeometry(wh.geometry), warehouseEdge);
-          e.position.copy(wh.position);
-          worldGroup.add(e);
         });
-      } else if (locationType === "campus") {
-        /* Campus-adjacent — render a few low office buildings on the
-         * far side of the parcel suggesting we're next to a corporate
-         * or university campus. Cleaner geometry, lighter palette. */
-        const officeMat = new THREE.MeshStandardMaterial({
-          color: 0x2a4055, roughness: 0.55, metalness: 0.2,
-        });
-        const officeEdge = new THREE.LineBasicMaterial({ color: 0x4a637c });
-        const offsets = [
-          { x: -sw(plan.site.w) * 0.55, z: sw(plan.site.h) * 0.35, w: 12, h: 5, d: 22 },
-          { x: -sw(plan.site.w) * 0.55, z: -sw(plan.site.h) * 0.05, w: 10, h: 6, d: 14 },
-          { x: sw(plan.site.w) * 0.55, z: sw(plan.site.h) * 0.4, w: 14, h: 4, d: 10 },
-        ];
-        offsets.forEach((p) => {
-          const m = new THREE.Mesh(new THREE.BoxGeometry(p.w, p.h, p.d), officeMat);
-          m.position.set(sx + p.x, p.h / 2, sz + p.z);
-          m.castShadow = true;
-          worldGroup.add(m);
-          const e = new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry), officeEdge);
-          e.position.copy(m.position);
-          worldGroup.add(e);
-        });
-        /* And a few ornamental trees near the campus edge */
-        const ornTreeMat = new THREE.MeshStandardMaterial({ color: 0x365e3f, roughness: 0.9 });
-        const ornTrunkMat = new THREE.MeshStandardMaterial({ color: 0x3d2615, roughness: 0.95 });
-        for (let i = 0; i < 8; i++) {
-          const ang = (i / 8) * Math.PI * 2;
-          const r = Math.max(sw(plan.site.w), sw(plan.site.h)) * 0.4;
+
+        /* A few hardy "industrial volunteer" trees that took root
+         * in the cracked yard — birch and poplar typical of
+         * post-industrial sites. */
+        for (let i = 0; i < 12; i++) {
+          const ang = (i / 12) * Math.PI * 2 + 0.3;
+          const r = Math.max(sw(plan.site.w), sw(plan.site.h)) * 0.46 + (i % 4) * 0.6;
           const tx = sx + Math.cos(ang) * r;
           const tz = sz + Math.sin(ang) * r;
-          const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.13, 1.0, 6), ornTrunkMat);
-          trunk.position.set(tx, 0.5, tz);
-          worldGroup.add(trunk);
-          const ball = new THREE.Mesh(new THREE.SphereGeometry(0.95, 10, 8), ornTreeMat);
-          ball.position.set(tx, 1.5, tz);
-          worldGroup.add(ball);
+          const sp = i % 5 < 2 ? "birch" : i % 5 < 4 ? "poplar" : "oak";
+          const tree = buildTree(sp, 0.7 + (i % 3) * 0.15, i * 23 + 41);
+          tree.position.set(tx, 0, tz);
+          tree.rotation.y = (i * 0.71) % (Math.PI * 2);
+          worldGroup.add(tree);
+          sceneTrees.push(tree);
+        }
+      } else if (locationType === "campus") {
+        /* Campus-adjacent — low-rise office buildings (3-5 stories)
+         * with curtain-wall window patterns + canopy entrances +
+         * landscaped strip between facility and campus. Reads as
+         * "next to a corporate/university campus". */
+        const officeShellMat = new THREE.MeshStandardMaterial({
+          color: 0x4a525d, roughness: 0.55, metalness: 0.25,
+          roughnessMap: proceduralNoiseTexture({ size: 64, scale: 4, seed: 89 }),
+        });
+        const officeRibbonMat = new THREE.MeshStandardMaterial({
+          color: 0x4a637c, roughness: 0.25, metalness: 0.75,
+          transparent: true, opacity: 0.7,
+        });
+        const officeAccentMat = new THREE.MeshStandardMaterial({
+          color: 0xb8c0c8, roughness: 0.4, metalness: 0.7,
+        });
+        const offsets = [
+          { x: -sw(plan.site.w) * 0.55, z: sw(plan.site.h) * 0.35, w: 12, h: 6, d: 24 },
+          { x: -sw(plan.site.w) * 0.55, z: -sw(plan.site.h) * 0.05, w: 10, h: 7, d: 14 },
+          { x: sw(plan.site.w) * 0.55, z: sw(plan.site.h) * 0.4, w: 14, h: 5, d: 11 },
+        ];
+        offsets.forEach((p, idx) => {
+          const ofc = new THREE.Group();
+          ofc.position.set(sx + p.x, 0, sz + p.z);
+
+          /* Main shell — chamfered + ribbon glass middle band */
+          const kickerH = p.h * 0.28;
+          const ribbonH = p.h * 0.5;
+          const capH = p.h - kickerH - ribbonH;
+          /* Kicker (concrete base) */
+          const kicker = new THREE.Mesh(
+            roundedBox(p.w, kickerH, p.d, 0.05),
+            officeShellMat,
+          );
+          kicker.position.y = kickerH / 2;
+          kicker.castShadow = true;
+          kicker.receiveShadow = true;
+          ofc.add(kicker);
+          /* Ribbon glass */
+          const ribbon = new THREE.Mesh(
+            new THREE.BoxGeometry(p.w * 0.99, ribbonH, p.d * 0.99),
+            officeRibbonMat,
+          );
+          ribbon.position.y = kickerH + ribbonH / 2;
+          ofc.add(ribbon);
+          /* Cap */
+          const cap = new THREE.Mesh(
+            roundedBox(p.w, capH, p.d, 0.05),
+            officeShellMat,
+          );
+          cap.position.y = kickerH + ribbonH + capH / 2;
+          cap.castShadow = true;
+          ofc.add(cap);
+
+          /* Vertical mullions across the ribbon */
+          const mullionCount = Math.max(6, Math.floor(p.w / 1.5));
+          for (let m = 1; m < mullionCount; m++) {
+            const mx = -p.w / 2 + (m / mullionCount) * p.w;
+            for (const s of [-1, 1]) {
+              const mull = new THREE.Mesh(
+                new THREE.BoxGeometry(0.05, ribbonH, 0.06),
+                officeAccentMat,
+              );
+              mull.position.set(mx, kickerH + ribbonH / 2, s * p.d / 2);
+              ofc.add(mull);
+            }
+          }
+
+          /* Entrance canopy on the long axis */
+          const canopy = new THREE.Mesh(
+            new THREE.BoxGeometry(p.w * 0.3, 0.12, 1.6),
+            officeAccentMat,
+          );
+          canopy.position.set(0, 1.8, p.d / 2 + 0.7);
+          ofc.add(canopy);
+          /* 2 support posts */
+          for (const cx2 of [-p.w * 0.12, p.w * 0.12]) {
+            const post = new THREE.Mesh(
+              new THREE.BoxGeometry(0.08, 1.8, 0.08),
+              officeAccentMat,
+            );
+            post.position.set(cx2, 0.9, p.d / 2 + 1.4);
+            ofc.add(post);
+          }
+
+          /* Roof HVAC */
+          for (let h = 0; h < 2; h++) {
+            const hvac = new THREE.Mesh(
+              roundedBox(0.9, 0.45, 0.7, 0.04),
+              new THREE.MeshStandardMaterial({
+                color: 0x3d464f, roughness: 0.6, metalness: 0.5,
+              }),
+            );
+            hvac.position.set(-p.w * 0.2 + h * (p.w * 0.4), p.h + 0.5, 0);
+            ofc.add(hvac);
+          }
+
+          worldGroup.add(ofc);
+        });
+
+        /* Ornamental trees lining the campus edge — varied species
+         * for a designed landscape feel. */
+        for (let i = 0; i < 14; i++) {
+          const ang = (i / 14) * Math.PI * 2;
+          const r = Math.max(sw(plan.site.w), sw(plan.site.h)) * 0.4 + (i % 3) * 0.35;
+          const tx = sx + Math.cos(ang) * r;
+          const tz = sz + Math.sin(ang) * r;
+          /* 60% ornamental, 25% birch, 15% poplar */
+          const sp = i % 7 < 4 ? "ornamental" : i % 7 < 6 ? "birch" : "poplar";
+          const tree = buildTree(sp, 0.85 + (i % 3) * 0.1, i * 17 + 23);
+          tree.position.set(tx, 0, tz);
+          tree.rotation.y = (i * 0.811) % (Math.PI * 2);
+          worldGroup.add(tree);
+          sceneTrees.push(tree);
         }
       }
     }
@@ -997,12 +1811,14 @@
     const bldg = plan.building;
     const slabGeo = new THREE.BoxGeometry(sw(bldg.w) * 1.04, 0.4, sw(bldg.h) * 1.04);
     const slabMat = new THREE.MeshStandardMaterial({
-      color: 0x131820, roughness: 0.85, metalness: 0.1,
+      color: 0x747a82, roughness: 0.85, metalness: 0.1,
+      roughnessMap: proceduralNoiseTexture({ size: 64, scale: 4, seed: 137 }),
     });
     const slab = new THREE.Mesh(slabGeo, slabMat);
     slab.position.set(0, -0.2, 0);
     slab.receiveShadow = true;
     worldGroup.add(slab);
+    queueTextureUpgrade(slabMat, POLYHAVEN_TEX.concrete, 4);
 
     /* Phase-1 stake-out marker: a thin mint outline rectangle on the
      * pad so the user sees where the building WILL go before the
@@ -1225,11 +2041,15 @@
 
       /* Concrete loading dock pad in front of the door */
       const dockPadGeo = new THREE.BoxGeometry(dockW + 1.4, 0.6, 2.4);
-      const dockPadMat = new THREE.MeshStandardMaterial({ color: 0x363f49, roughness: 0.95 });
+      const dockPadMat = new THREE.MeshStandardMaterial({
+        color: 0x6e747d, roughness: 0.95,
+        roughnessMap: proceduralNoiseTexture({ size: 64, scale: 5, seed: 141 }),
+      });
       const dockPad = new THREE.Mesh(dockPadGeo, dockPadMat);
       dockPad.position.set(dockOff, 0.3, -D / 2 - 1.4);
       dockPad.receiveShadow = true;
       worldGroup.add(dockPad);
+      queueTextureUpgrade(dockPadMat, POLYHAVEN_TEX.asphalt, 3);
 
       /* ---------- SCALE ANCHORS ----------
        * A 1.8m human silhouette and a counter-balance forklift parked
@@ -1592,13 +2412,199 @@
         }
       }
 
-      /* HVAC ducts running across part of the roof */
-      const ductMat = new THREE.MeshStandardMaterial({ color: 0xc8cdd4, roughness: 0.4, metalness: 0.55 });
-      const ductGeo = new THREE.BoxGeometry(W * 0.6, 0.35, 0.5);
-      const duct = new THREE.Mesh(ductGeo, ductMat);
+      /* HVAC ducts running across part of the roof — galvanised steel
+       * with proper hangers + reinforcement bands so the duct reads as
+       * a real fabricated air-handling run. */
+      const ductMat = new THREE.MeshStandardMaterial({
+        color: 0xc8cdd4, roughness: 0.4, metalness: 0.55,
+        roughnessMap: proceduralNoiseTexture({ size: 64, scale: 4, seed: 101 }),
+      });
+      const ductBandMat = new THREE.MeshStandardMaterial({
+        color: 0x5a626d, roughness: 0.55, metalness: 0.45,
+      });
+      const duct = new THREE.Mesh(roundedBox(W * 0.6, 0.35, 0.5, 0.04), ductMat);
       duct.position.set(0, BUILDING_HEIGHT + 0.55, D * 0.1);
       duct.castShadow = true;
       worldGroup.add(duct);
+      /* Reinforcement bands every ~2m along the duct */
+      const bandCount = Math.floor(W * 0.6 / 2);
+      for (let b = 0; b < bandCount; b++) {
+        const band = new THREE.Mesh(
+          new THREE.BoxGeometry(0.06, 0.4, 0.55),
+          ductBandMat,
+        );
+        band.position.set(
+          -W * 0.3 + (b + 0.5) * (W * 0.6 / bandCount),
+          BUILDING_HEIGHT + 0.55,
+          D * 0.1,
+        );
+        worldGroup.add(band);
+      }
+
+      /* Rooftop condenser cluster — small array of dry-coolers near
+       * the centre of the roof. Always present (the building always
+       * has some air handling regardless of cooling type, just less
+       * for liquid-cooled). */
+      const condenserCount = coolingType === "immersion" ? 2
+        : coolingType === "d2c" ? 4 : 6;
+      const condenserMat = new THREE.MeshStandardMaterial({
+        color: 0x4d5660, roughness: 0.6, metalness: 0.5,
+      });
+      const condenserGrilleMat = new THREE.MeshStandardMaterial({
+        color: 0xb8c0c8, roughness: 0.4, metalness: 0.7,
+      });
+      for (let i = 0; i < condenserCount; i++) {
+        const cluster = new THREE.Group();
+        const cx2 = W * 0.18 + (i % 3) * 1.2 - 1.2;
+        const cz2 = D * 0.32 - Math.floor(i / 3) * 1.4;
+        cluster.position.set(cx2, BUILDING_HEIGHT + 0.45, cz2);
+        const box = new THREE.Mesh(roundedBox(0.95, 0.7, 0.85, 0.04), condenserMat);
+        box.castShadow = true;
+        cluster.add(box);
+        /* Side-mount fan grille */
+        const grille = new THREE.Mesh(
+          new THREE.TorusGeometry(0.28, 0.025, 6, 16),
+          condenserGrilleMat,
+        );
+        grille.rotation.y = Math.PI / 2;
+        grille.position.x = 0.43;
+        cluster.add(grille);
+        worldGroup.add(cluster);
+      }
+
+      /* Satellite dishes — every DC has at least 1-2 for OOB
+       * management connectivity. We add 2 angled toward the
+       * sky-southwest. */
+      const dishMat = new THREE.MeshStandardMaterial({
+        color: 0xe6e8ec, roughness: 0.45, metalness: 0.55,
+      });
+      const dishStandMat = new THREE.MeshStandardMaterial({
+        color: 0x40474f, roughness: 0.6, metalness: 0.5,
+      });
+      for (let i = 0; i < 2; i++) {
+        const stand = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.05, 0.05, 0.6, 8),
+          dishStandMat,
+        );
+        stand.position.set(-W * 0.42 + i * 0.9, BUILDING_HEIGHT + 0.6, -D * 0.42);
+        worldGroup.add(stand);
+        const dish = new THREE.Mesh(
+          new THREE.SphereGeometry(0.42, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2.4),
+          dishMat,
+        );
+        dish.rotation.x = -0.6;
+        dish.rotation.y = -0.3 + i * 0.4;
+        dish.position.set(-W * 0.42 + i * 0.9, BUILDING_HEIGHT + 1.0, -D * 0.42);
+        worldGroup.add(dish);
+        /* LNB feed at dish focus */
+        const lnb = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.04, 0.04, 0.18, 8),
+          dishStandMat,
+        );
+        lnb.rotation.x = 0.6;
+        lnb.position.set(-W * 0.42 + i * 0.9, BUILDING_HEIGHT + 1.18, -D * 0.42 + 0.32);
+        worldGroup.add(lnb);
+      }
+
+      /* Lightning rods at the four roof corners — thin tapered
+       * cylinders with red caps, like real Franklin-style air
+       * terminals. */
+      const rodMat = new THREE.MeshStandardMaterial({
+        color: 0xc8cdd4, roughness: 0.4, metalness: 0.85,
+      });
+      const rodCapMat = new THREE.MeshStandardMaterial({
+        color: 0xd14a3a, roughness: 0.5, metalness: 0.4,
+        emissive: 0x4a1208, emissiveIntensity: 0.4,
+      });
+      for (const [rx, rz] of [
+        [W / 2 - 0.4, D / 2 - 0.4],
+        [-W / 2 + 0.4, D / 2 - 0.4],
+        [W / 2 - 0.4, -D / 2 + 0.4],
+        [-W / 2 + 0.4, -D / 2 + 0.4],
+      ]) {
+        const rod = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.025, 0.04, 1.4, 8),
+          rodMat,
+        );
+        rod.position.set(rx, BUILDING_HEIGHT + parapetH + 0.7, rz);
+        worldGroup.add(rod);
+        const cap = new THREE.Mesh(
+          new THREE.SphereGeometry(0.05, 8, 6),
+          rodCapMat,
+        );
+        cap.position.set(rx, BUILDING_HEIGHT + parapetH + 1.4, rz);
+        worldGroup.add(cap);
+      }
+
+      /* Drainage scuppers — small rectangular outlets through the
+       * parapet on the north and south edges, where rain runs off
+       * the membrane. Tiny but visually grounding. */
+      const scupperMat = new THREE.MeshStandardMaterial({
+        color: 0x2a323b, roughness: 0.7, metalness: 0.5,
+      });
+      for (let s = -2; s <= 2; s += 2) {
+        for (const z of [D / 2, -D / 2]) {
+          const sc = new THREE.Mesh(
+            new THREE.BoxGeometry(0.5, 0.18, 0.45),
+            scupperMat,
+          );
+          sc.position.set(s * (W / 6), BUILDING_HEIGHT + 0.45, z);
+          worldGroup.add(sc);
+        }
+      }
+
+      /* Roof-access service ladder — climbs the parapet on the
+       * mechanical-room side. */
+      const ladderMat = new THREE.MeshStandardMaterial({
+        color: 0x4a525c, roughness: 0.65, metalness: 0.55,
+      });
+      const ladderRail1 = new THREE.Mesh(
+        new THREE.BoxGeometry(0.04, parapetH + 0.4, 0.04),
+        ladderMat,
+      );
+      ladderRail1.position.set(-W / 2 - 0.05, BUILDING_HEIGHT + parapetH * 0.5 + 0.3, 0.25);
+      worldGroup.add(ladderRail1);
+      const ladderRail2 = new THREE.Mesh(
+        new THREE.BoxGeometry(0.04, parapetH + 0.4, 0.04),
+        ladderMat,
+      );
+      ladderRail2.position.set(-W / 2 - 0.05, BUILDING_HEIGHT + parapetH * 0.5 + 0.3, -0.25);
+      worldGroup.add(ladderRail2);
+      for (let r = 0; r < 5; r++) {
+        const rung = new THREE.Mesh(
+          new THREE.BoxGeometry(0.04, 0.025, 0.55),
+          ladderMat,
+        );
+        rung.position.set(
+          -W / 2 - 0.05,
+          BUILDING_HEIGHT + 0.05 + r * (parapetH + 0.4) / 5,
+          0,
+        );
+        worldGroup.add(rung);
+      }
+
+      /* Wall-mounted facility nameplate — thin sign board centred
+       * above the loading dock. Adds the "this is a real building
+       * with branded entrance" feel. */
+      const signMat = new THREE.MeshStandardMaterial({
+        color: 0x33fbd3, roughness: 0.4, metalness: 0,
+        emissive: 0x33fbd3, emissiveIntensity: 0.5,
+      });
+      const signBackerMat = new THREE.MeshStandardMaterial({
+        color: 0x101820, roughness: 0.7, metalness: 0.4,
+      });
+      const sign = new THREE.Mesh(
+        roundedBox(W * 0.18, 0.6, 0.08, 0.04),
+        signBackerMat,
+      );
+      sign.position.set(0, BUILDING_HEIGHT * 0.78, D / 2 + 0.05);
+      worldGroup.add(sign);
+      const signText = new THREE.Mesh(
+        new THREE.BoxGeometry(W * 0.16, 0.42, 0.025),
+        signMat,
+      );
+      signText.position.set(0, BUILDING_HEIGHT * 0.78, D / 2 + 0.11);
+      worldGroup.add(signText);
     }
 
     /* ---------- Floor grid inside building ---------- */
@@ -2490,7 +3496,13 @@
         emissive: 0x33fbd3, emissiveIntensity: 0.7,
       });
 
-      const genCount = 4;
+      /* Genset count scales with the gas-power share — a 25% gas
+       * mix gets the standard 2x N+1 redundancy line-up, 50% gets 3,
+       * 75% gets 4, 100% gets 5. Reflects real DC power-block sizing. */
+      const genCount = powerMix.gas >= 75 ? 5
+                     : powerMix.gas >= 50 ? 4
+                     : powerMix.gas >= 25 ? 3
+                     : 2;
       const genGroup = new THREE.Group();
       for (let i = 0; i < genCount; i++) {
         const t = (i + 0.5) / genCount;
@@ -2595,8 +3607,19 @@
      *   - Top-mounted ventilation grille (heat exhaust)
      *   - Mint status LED bar across the door
      *   - Bus bar conduit running along the top connecting all units
-     */
-    if (powerMix.gas > 0 || powerMix.solar > 0 || powerMix.wind > 0) {
+     *
+     * Phase gating: BESS appears as soon as ANY power source is
+     * configured (including grid-only / `fom`) since every DC needs
+     * UPS ride-through. The cabinet count scales with the size of
+     * the non-firm portion (gas + solar + wind + smr), since those
+     * sources need the most stabilisation. */
+    const nonFirmPct = (powerMix.gas || 0) + (powerMix.solar || 0)
+                     + (powerMix.wind || 0) + (powerMix.smr || 0);
+    const bessCount = nonFirmPct >= 60 ? 4
+                    : nonFirmPct >= 30 ? 3
+                    : 2;
+    if (powerMix.gas > 0 || powerMix.solar > 0 || powerMix.wind > 0 ||
+        powerMix.smr > 0 || powerMix.fom > 0) {
       const bx = yardX + 9;
       const bz = yardZ0;
       addPad(bx, bz, 5, 5, 0x1a2530);
@@ -2626,9 +3649,13 @@
       });
 
       const bessGroup = new THREE.Group();
-      for (let i = 0; i < 3; i++) {
+      /* Place cabinets centred around `bx` with 1.5m spacing so
+       * a 2-cabinet row centres on bx, a 3-cab row spans ±1.5m,
+       * a 4-cab row spans ±2.25m. */
+      const startX = bx - ((bessCount - 1) * 1.5) / 2;
+      for (let i = 0; i < bessCount; i++) {
         const cab = new THREE.Group();
-        cab.position.set(bx - 1.5 + i * 1.5, padHeight, bz);
+        cab.position.set(startX + i * 1.5, padHeight, bz);
 
         /* Main shell */
         const shell = new THREE.Mesh(roundedBox(1.4, 1.2, 1.4, 0.06), bessShellMat);
@@ -2691,9 +3718,10 @@
         bessGroup.add(cab);
       }
 
-      /* Top-running bus-bar conduit linking the three cabinets */
+      /* Top-running bus-bar conduit linking all cabinets */
+      const conduitW = (bessCount - 1) * 1.5 + 1.5;
       const conduit = new THREE.Mesh(
-        new THREE.BoxGeometry(3.5, 0.12, 0.18),
+        new THREE.BoxGeometry(conduitW, 0.12, 0.18),
         conduitMat,
       );
       conduit.position.set(bx, padHeight + 1.32, bz - 0.6);
@@ -2903,23 +3931,140 @@
       });
     }
 
-    /* SMR pad */
+    /* SMR — Small Modular Reactor. Realistic containment-vessel
+     * assembly inspired by NuScale / GE BWRX-300 visuals:
+     *   - Concrete reactor pad
+     *   - Cylindrical containment vessel with domed top
+     *   - Two cylindrical heat-exchanger modules flanking the
+     *     containment (the "heat island")
+     *   - Cooling tower (hyperbolic profile via tapered cylinder)
+     *   - Radiation-warning placards (yellow + black hazard)
+     *   - Service walkway between modules
+     *
+     * Module count scales with smr percentage (1 module per 25%). */
     if (powerMix.smr > 0) {
       const sx2 = yardX - sw(60);
       const sz2 = yardZ0 + sw(140);
-      addPad(sx2, sz2, 5, 5, 0x232f24);
-      const smrMat = new THREE.MeshStandardMaterial({
-        color: 0x33503c, roughness: 0.4, metalness: 0.5,
-        emissive: 0x0a2412, emissiveIntensity: 0.55,
+      const moduleCount = Math.max(1, Math.ceil(powerMix.smr / 25));
+      addPad(sx2, sz2, 6 + moduleCount * 1.2, 6, 0x747a82);
+
+      const containmentMat = new THREE.MeshStandardMaterial({
+        color: 0xc4cad2, roughness: 0.45, metalness: 0.7,
+        emissive: 0x0a2014, emissiveIntensity: 0.18,
+        roughnessMap: proceduralNoiseTexture({ size: 64, scale: 4, seed: 151 }),
       });
-      const smrShell = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 2.6, 16), smrMat);
-      smrShell.position.set(sx2, padHeight + 1.3, sz2);
-      smrShell.castShadow = true;
-      worldGroup.add(smrShell);
+      const heatExchangerMat = new THREE.MeshStandardMaterial({
+        color: 0x4a5560, roughness: 0.5, metalness: 0.65,
+      });
+      const towerMat = new THREE.MeshStandardMaterial({
+        color: 0xdde2e8, roughness: 0.6, metalness: 0.25,
+        emissive: 0x141a1c, emissiveIntensity: 0.05,
+      });
+      const placardMat = new THREE.MeshStandardMaterial({
+        color: 0xffd23a, roughness: 0.5, metalness: 0,
+        emissive: 0xffd23a, emissiveIntensity: 0.5,
+      });
+      const walkwayMat = new THREE.MeshStandardMaterial({
+        color: 0x4a525c, roughness: 0.65, metalness: 0.5,
+      });
+
+      const smrGroup = new THREE.Group();
+
+      for (let m = 0; m < moduleCount; m++) {
+        const mxOff = (m - (moduleCount - 1) / 2) * 2.2;
+
+        /* Containment vessel — main cylinder */
+        const containment = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.85, 0.85, 2.6, 24),
+          containmentMat,
+        );
+        containment.position.set(sx2 + mxOff, padHeight + 1.3, sz2);
+        containment.castShadow = true;
+        containment.receiveShadow = true;
+        smrGroup.add(containment);
+
+        /* Domed top cap — half-sphere matching the cylinder radius */
+        const dome = new THREE.Mesh(
+          new THREE.SphereGeometry(0.85, 18, 12, 0, Math.PI * 2, 0, Math.PI / 2),
+          containmentMat,
+        );
+        dome.position.set(sx2 + mxOff, padHeight + 2.6, sz2);
+        dome.castShadow = true;
+        smrGroup.add(dome);
+
+        /* Pressure-vessel banding rings */
+        for (let r = 0; r < 3; r++) {
+          const band = new THREE.Mesh(
+            new THREE.TorusGeometry(0.87, 0.04, 6, 24),
+            heatExchangerMat,
+          );
+          band.rotation.x = Math.PI / 2;
+          band.position.set(sx2 + mxOff, padHeight + 0.5 + r * 0.85, sz2);
+          smrGroup.add(band);
+        }
+
+        /* Heat-exchanger modules flanking the containment — slim
+         * cylinders representing the steam generator + condenser. */
+        for (const dx of [-1.1, 1.1]) {
+          const hx = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.22, 0.22, 1.8, 14),
+            heatExchangerMat,
+          );
+          hx.position.set(sx2 + mxOff + dx * 0.25, padHeight + 0.9, sz2 + dx * 0.4);
+          hx.castShadow = true;
+          smrGroup.add(hx);
+        }
+
+        /* Radiation-warning placard on the front */
+        const placard = new THREE.Mesh(
+          new THREE.BoxGeometry(0.3, 0.3, 0.02),
+          placardMat,
+        );
+        placard.position.set(sx2 + mxOff, padHeight + 1.0, sz2 + 0.86);
+        smrGroup.add(placard);
+      }
+
+      /* Hyperbolic cooling tower behind the SMR pad — every nuclear
+       * plant has one. Implemented as a tapered cylinder with an
+       * indented waist. */
+      const towerY = padHeight + 1.8;
+      const towerH = 4.0;
+      const tower = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.85, 1.4, towerH, 22, 4),
+        towerMat,
+      );
+      tower.position.set(sx2 + (moduleCount * 1.2), towerY, sz2 - 1.6);
+      tower.castShadow = true;
+      smrGroup.add(tower);
+
+      /* Wisp of "steam" plume on top — Sprite with cloud puff
+       * texture so it always faces camera */
+      const steam = new THREE.Sprite(
+        new THREE.SpriteMaterial({
+          map: cloudPuffTexCore,
+          transparent: true,
+          opacity: 0.7,
+          depthWrite: false,
+        }),
+      );
+      steam.scale.set(2.4, 2.4, 1);
+      steam.position.set(sx2 + (moduleCount * 1.2), towerY + towerH * 0.6 + 0.5, sz2 - 1.6);
+      smrGroup.add(steam);
+
+      /* Service walkway — narrow grated platform connecting modules */
+      const walkway = new THREE.Mesh(
+        new THREE.BoxGeometry((moduleCount - 1) * 2.2 + 0.2, 0.08, 0.6),
+        walkwayMat,
+      );
+      walkway.position.set(sx2, padHeight + 0.18, sz2 + 1.1);
+      smrGroup.add(walkway);
+
+      worldGroup.add(smrGroup);
+
       labelTargets.push({
         x: sx2, y: 3.4, z: sz2,
         title: "SMR REACTOR",
-        sub: `${Math.round(powerMix.smr)}% nuclear`,
+        sub: `${Math.round(powerMix.smr)}% nuclear (${moduleCount} module${moduleCount > 1 ? "s" : ""})`,
         kind: "energy",
       });
     }
@@ -3214,16 +4359,18 @@
     let t0 = performance.now();
     const tmpVec = new THREE.Vector3();
     /* Cache the DCIM scan plane + radial scan ring + wind rotor +
-     * cloud group once (if they exist) so the per-frame loop doesn't
+     * tree groups once (if they exist) so the per-frame loop doesn't
      * traverse the scene each frame. */
     let scanPlane = null;
     let scanRing = null;
     let windRotor = null;
+    const trees = [];
     worldGroup.traverse((obj) => {
       if (!obj.userData) return;
       if (obj.userData.kind === "dcim-scan") scanPlane = obj;
       else if (obj.userData.kind === "dcim-scan-ring") scanRing = obj;
       else if (obj.userData.kind === "wind-rotor") windRotor = obj;
+      else if (obj.userData.kind === "tree") trees.push(obj);
     });
     /* Constants for the radial scan: full sweep every SCAN_PERIOD
      * seconds; the ring expands from r=0.6 to r=maxRadius and fades
@@ -3268,6 +4415,19 @@
       for (let i = 0; i < chillerFanRotors.length; i++) {
         const r = chillerFanRotors[i];
         r.rotation.y = dt * 3.5 + (r.userData.spinOffset || 0);
+      }
+
+      /* Tree wind sway — cheap sinusoidal Z + X tilt per tree with
+       * a per-tree phase + amplitude so the canopy reads as a
+       * gentle breeze, not a synchronised wave. ~50-60 trees max
+       * per scene; loop is microseconds. */
+      for (let i = 0; i < trees.length; i++) {
+        const t = trees[i];
+        const ud = t.userData;
+        const phase = ud.swayPhase || 0;
+        const amp = ud.swayAmp || 0.018;
+        t.rotation.z = Math.sin(dt * 0.7 + phase) * amp;
+        t.rotation.x = Math.sin(dt * 0.55 + phase * 1.3) * amp * 0.6;
       }
 
       /* Clouds drift along circular orbits around the scene's Y
