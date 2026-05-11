@@ -1341,7 +1341,11 @@
        * narrow concrete strip so it reads as utility infrastructure. */
       const roadGeo = new THREE.BoxGeometry(yardOffset * 0.6, 0.12, 4);
       const roadMat = new THREE.MeshStandardMaterial({
-        color: 0x2a3138, roughness: 0.8, metalness: 0.05,
+        color: 0x2a3138, roughness: 1.0, metalness: 0,
+        /* Matte asphalt -- access road shouldn't catch IBL glare
+         * the way it did before (consistent with dock/parking
+         * pad fixes). */
+        envMapIntensity: 0.15,
       });
       const road = new THREE.Mesh(roadGeo, roadMat);
       road.position.set(yardX_world / 2, -0.4, 0);
@@ -2091,11 +2095,16 @@
       dockDoor.castShadow = true;
       worldGroup.add(dockDoor);
 
-      /* Concrete loading dock pad in front of the door */
+      /* Concrete loading dock pad in front of the door. envMap
+       * intensity capped low because the dock pad sits in full
+       * sunlight under the IBL and was picking up a hot specular
+       * gleam at certain orbit angles -- spotted in QA. Matte
+       * concrete in real life reflects almost nothing. */
       const dockPadGeo = new THREE.BoxGeometry(dockW + 1.4, 0.6, 2.4);
       const dockPadMat = new THREE.MeshStandardMaterial({
-        color: 0x6e747d, roughness: 0.95,
+        color: 0x6e747d, roughness: 1.0, metalness: 0,
         roughnessMap: proceduralNoiseTexture({ size: 64, scale: 5, seed: 141 }),
+        envMapIntensity: 0.15,
       });
       const dockPad = new THREE.Mesh(dockPadGeo, dockPadMat);
       dockPad.position.set(dockOff, 0.3, -D / 2 - 1.4);
@@ -2243,6 +2252,127 @@
       forklift.rotation.y = -0.4;
       forklift.traverse((m) => { m.castShadow = true; m.receiveShadow = true; });
       anchorGroup.add(forklift);
+
+      /* ---------- PHASE-3 "CHIPS ON ORDER" INDICATOR ----------
+       *
+       * After the v5 phase reorder, Phase 3 is COMPUTE STACK -- the
+       * user commits to a chip class (H100 / B200 / Rubin) BEFORE
+       * the facility shell + cooling are built (Phase 4). But the
+       * physical racks don't land in the data hall until Phase 6
+       * (after fiber + facility).
+       *
+       * Without a visual cue, Phase 3 felt identical to Phase 2 in
+       * the scene -- nothing new appeared just because the user
+       * picked a GPU. The user explicitly flagged "for each step
+       * the user should experience something new".
+       *
+       * This bridge: a stack of two shipping containers parked at
+       * the loading dock from Phase 3 onwards, with a small "chip
+       * crate" pallet beside them. Reads as "chip allocation is
+       * locked, hardware is en route." Disappears at Phase 6 when
+       * the racks actually populate the data hall.
+       */
+      if (showComputeCommitted && phase < 6) {
+        const containerMat = new THREE.MeshStandardMaterial({
+          color: 0x6dd6ff, // mint-sky to stay on brand
+          roughness: 0.7, metalness: 0.4,
+          emissive: 0x0a3548, emissiveIntensity: 0.25,
+        });
+        const containerRibMat = new THREE.MeshStandardMaterial({
+          color: 0x3a7a92, roughness: 0.75, metalness: 0.45,
+        });
+        const palletMat = new THREE.MeshStandardMaterial({
+          color: 0x6e4a2a, roughness: 0.95, metalness: 0,
+        });
+        const chipBoxMat = new THREE.MeshStandardMaterial({
+          color: 0xc8cdd4, roughness: 0.55, metalness: 0.2,
+        });
+
+        const chipShipment = new THREE.Group();
+        /* Park the shipment EAST of the dock, on its own staging
+         * apron south of the building. This avoids:
+         *   - the forklift parked WEST of the dock
+         *     (dockOff - dockW/2 - 1, -D/2 - 2.4)
+         *   - the human silhouette EAST of the dock at the
+         *     people-side of the operation
+         *   - the dock pad itself (chips physically stage on the
+         *     gravel apron, not on top of the unloading pad).
+         * 3 units further south than the dock pad so it reads as
+         * "queued for unloading" rather than "being unloaded now." */
+        chipShipment.position.set(
+          dockOff + dockW * 1.5, 0, -D / 2 - 3.0
+        );
+
+        /* Two 20-ft containers stacked / side-by-side */
+        for (let c = 0; c < 2; c++) {
+          const cont = new THREE.Mesh(
+            roundedBox(2.4, 1.1, 0.95, 0.04),
+            containerMat,
+          );
+          cont.position.set(c * 2.6, 0.55, 0);
+          cont.castShadow = true;
+          cont.receiveShadow = true;
+          chipShipment.add(cont);
+          /* Vertical ribs every 0.4m so they read as real shipping
+           * containers, not painted boxes. */
+          for (let r = 0; r < 6; r++) {
+            const rib = new THREE.Mesh(
+              new THREE.BoxGeometry(0.02, 1.0, 0.02),
+              containerRibMat,
+            );
+            rib.position.set(c * 2.6 - 1.0 + r * 0.4, 0.55, 0.485);
+            chipShipment.add(rib);
+            /* Mirror to the back face for symmetry */
+            const ribBack = rib.clone();
+            ribBack.position.z = -0.485;
+            chipShipment.add(ribBack);
+          }
+          /* Container door seam line on the +X end */
+          const seam = new THREE.Mesh(
+            new THREE.BoxGeometry(0.025, 1.04, 0.92),
+            containerRibMat,
+          );
+          seam.position.set(c * 2.6 + 1.21, 0.55, 0);
+          chipShipment.add(seam);
+        }
+
+        /* Wooden pallet on the dock pad with a smaller "GPU crate"
+         * on top -- shows that the FIRST shipment is being staged. */
+        const pallet = new THREE.Mesh(
+          roundedBox(0.95, 0.12, 0.85, 0.02),
+          palletMat,
+        );
+        pallet.position.set(-1.5, 0.06 + 0.6, 0);
+        chipShipment.add(pallet);
+        const chipBox = new THREE.Mesh(
+          roundedBox(0.85, 0.6, 0.75, 0.03),
+          chipBoxMat,
+        );
+        chipBox.position.set(-1.5, 0.42 + 0.6, 0);
+        chipBox.castShadow = true;
+        chipShipment.add(chipBox);
+        /* Mint hazard stripe on the crate */
+        const stripe = new THREE.Mesh(
+          new THREE.BoxGeometry(0.86, 0.05, 0.76),
+          new THREE.MeshStandardMaterial({
+            color: 0x33fbd3, emissive: 0x33fbd3, emissiveIntensity: 0.5,
+          }),
+        );
+        stripe.position.set(-1.5, 0.65 + 0.6, 0);
+        chipShipment.add(stripe);
+
+        anchorGroup.add(chipShipment);
+
+        labelTargets.push({
+          x: dockOff + dockW * 1.5 + 1.3,
+          y: 2.2,
+          z: -D / 2 - 3.0,
+          title: "CHIPS EN ROUTE",
+          sub: `${(gpuModel || "GPU").toUpperCase()} allocation committed`,
+          kind: "compute",
+          radius: 3,
+        });
+      }
 
       /* ---------- ARCHITECTURAL DC DETAIL ----------
        *
@@ -2487,7 +2617,10 @@
         new THREE.BoxGeometry(11, 0.12, 8),
         new THREE.MeshStandardMaterial({
           color: 0x4a5258, roughness: 1.0, metalness: 0,
-          envMapIntensity: 0.3,
+          /* Dropped 0.30 -> 0.15 after QA spotted a residual sun
+           * glare on the asphalt at certain orbit angles. Real
+           * asphalt is matte; this gets us closer to that. */
+          envMapIntensity: 0.15,
         }),
       );
       parkingPad.position.set(parkingX, 0.06, parkingZ);
@@ -4489,7 +4622,14 @@
     const padHeight = 0.35;
 
     function addPad(x, z, w, d, color = 0x1a1f24) {
-      const padMat = new THREE.MeshStandardMaterial({ color, roughness: 0.85, metalness: 0.05 });
+      /* Equipment pads under gensets / BESS / SMR / fuel farm are
+       * matte concrete. Roughness 1.0 + envMapIntensity 0.15 keeps
+       * them from picking up IBL specular -- consistent with the
+       * dock / parking / road pads. */
+      const padMat = new THREE.MeshStandardMaterial({
+        color, roughness: 1.0, metalness: 0,
+        envMapIntensity: 0.15,
+      });
       const pad = new THREE.Mesh(new THREE.BoxGeometry(w, padHeight, d), padMat);
       pad.position.set(x, padHeight / 2, z);
       pad.receiveShadow = true;
@@ -5450,6 +5590,13 @@
     controls.minDistance = 12;
     controls.maxDistance = 280;
     controls.maxPolarAngle = Math.PI * 0.495; // never look up from below
+    /* Clamp the MINIMUM polar angle so the camera can't pitch
+     * straight down onto the roof. Polar = 0 means camera directly
+     * above the target; PI/2 means horizontal. We allow pitches no
+     * closer to overhead than ~32 degrees, which keeps the horizon
+     * visible from every orbit position and preserves the multi-
+     * volume building silhouette. */
+    controls.minPolarAngle = Math.PI * 0.18;
     controls.update();
 
     /* ---------- Resize handling ---------- */
