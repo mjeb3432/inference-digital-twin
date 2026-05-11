@@ -1,12 +1,28 @@
 ﻿(() => {
   "use strict";
 
+  /* PHASES — ordered per modern AI-data-center construction best
+   * practice. Industry sources used:
+   *   - NVIDIA "Reference Architectures for AI Factory" (2024)
+   *   - Uptime Institute Tier Standard III/IV (compute-density-led)
+   *   - OCP Open Rack 3.0 + Open System Firmware coupling
+   *   - NREL "Data Center Cooling Best Practices" 2024
+   *
+   * The reorder vs the earlier sequence: COMPUTE STACK moved up
+   * (was Phase 5, now Phase 3) and CONNECTIVITY (FIBER) moved down
+   * (was Phase 3, now Phase 5). Rationale: high-end AI chips
+   * (H200 / B200 / Rubin) have 12-18 month lead times and >30 kW
+   * per rack densities that LOCK the cooling architecture. You
+   * cannot pour the slab + build the mechanical plant without first
+   * knowing the IT load -- so chip class must commit before
+   * facility construction starts. Fiber + carriers can be procured
+   * in parallel but the build-out finishes after the shell is up. */
   const PHASES = [
     "SITE SELECTION & PERMITTING",
     "POWER PROCUREMENT",
-    "CONNECTIVITY (FIBER)",
-    "FACILITY CONSTRUCTION",
     "COMPUTE STACK",
+    "FACILITY CONSTRUCTION",
+    "CONNECTIVITY (FIBER)",
     "NETWORKING (INTERCONNECT)",
     "DCIM & MONITORING",
     "FACILITY COMPLETE",
@@ -19,23 +35,23 @@
       next: "Next lock: secure a firm power backbone.",
     },
     2: {
-      title: "Secure firm power before sizing the shell.",
-      body: "Grid, gas, and SMR are treated as 24/7 firm supply. Solar and wind act as lower-cost energy overlays and need matching firm backing.",
-      next: "Next lock: land the carrier entrances and MMR path.",
+      title: "Secure firm power before anything else.",
+      body: "Grid, gas, and SMR are treated as 24/7 firm supply. Solar and wind act as lower-cost energy overlays and need matching firm backing. Power has the longest lead time of any decision -- grid interconnect alone can be 12-24 months.",
+      next: "Next lock: commit to the compute class so cooling can be sized.",
     },
     3: {
-      title: "Bring carriers to the site edge.",
-      body: "The fiber entry model and carrier set determine resiliency and latency before the building interior is finalized.",
-      next: "Next lock: turn the power plan into a buildable shell.",
+      title: "Commit the compute class -- this drives everything downstream.",
+      body: "Modern AI silicon (H200 / B200 / Rubin) has 12-18 month lead times and >30 kW per rack densities. The chip choice locks the cooling architecture and slab loading, so it must be made BEFORE the facility shell is poured. (NVIDIA Reference Architectures 2024, OCP Open Rack 3.0).",
+      next: "Next lock: turn the procured MW + chip plan into a buildable shell.",
     },
     4: {
-      title: "Convert procured MW into a buildable plant.",
-      body: "Developer type, cooling, and electrical architecture decide how much of the purchased facility load turns into usable IT load.",
-      next: "Next lock: fit the compute stack inside the real rack envelope.",
+      title: "Convert chip + power decisions into a buildable plant.",
+      body: "Developer type, cooling, and electrical architecture decide how much of the purchased facility load turns into usable IT load. Cooling is now constrained by the chip class chosen in Phase 3.",
+      next: "Next lock: land the carrier entrances and MMR path.",
     },
     5: {
-      title: "Install compute only after density is real.",
-      body: "GPU generation, rack density, and serving stack must fit the cooling and power architecture chosen upstream.",
+      title: "Bring carriers to the site edge.",
+      body: "The fiber entry model and carrier set determine resiliency and last-mile latency. IXP proximity is computed from real haversine distance to the deployment city.",
       next: "Next lock: scale out the cluster fabric.",
     },
     6: {
@@ -313,6 +329,46 @@
     { label: "PARIS", lon: 2.35, lat: 48.86 },
     { label: "MEXICO CITY", lon: -99.13, lat: 19.43 },
   ];
+
+  /* Demand-basin signature per DC location type. Drives which cities
+   * show as active demand basins on the Phase 8 map view, and how
+   * intense each arc reads. Reflects real-world traffic patterns:
+   *
+   *   rural      Hyperscaler greenfield -- serves global anycast.
+   *              Every basin lit, balanced intensity.
+   *   urban      Edge-adjacent metro DC -- traffic skewed to local
+   *              and nearby-region basins; far ones de-emphasized.
+   *   repurpose  Brownfield retrofit -- tier-2 / batch jobs from
+   *              specific regional basins, not global.
+   *   campus     Research / enterprise -- a small curated set of
+   *              partner-city basins, not consumer-style.
+   */
+  const DEMAND_BASIN_PROFILE = {
+    rural: {
+      label: "GLOBAL ANYCAST",
+      activeCities: null, // null = all cities active
+      intensityFloor: 0.85,
+    },
+    urban: {
+      label: "REGIONAL EDGE",
+      activeCities: null, // all cities, but local arcs glow stronger
+      intensityFloor: 0.4,
+      localBoost: true,
+    },
+    repurpose: {
+      label: "BATCH / TIER-2",
+      // Only tier-2 / capacity-batch basins -- skip NYC/London/Tokyo
+      activeCities: ["SAO PAULO", "MUMBAI", "MEXICO CITY", "TORONTO", "PARIS"],
+      intensityFloor: 0.55,
+    },
+    campus: {
+      label: "RESEARCH / ENTERPRISE",
+      // Curated partner cities -- the kind of DC that serves
+      // institutional / B2B traffic, not consumer.
+      activeCities: ["LONDON", "PARIS", "TORONTO", "TOKYO"],
+      intensityFloor: 0.65,
+    },
+  };
 
   const MAP_VIEWBOX = Object.freeze({
     w: 1200,
@@ -1033,7 +1089,7 @@
     }, 45);
 
     window.setInterval(() => {
-      if (facilityState.phase >= 5 && ui.rackCache.length) {
+      if (facilityState.phase >= 6 && ui.rackCache.length) {
         ui.rackCache.forEach((rack) => {
           rack.temp = clamp(rack.temp + (Math.random() - 0.5) * 0.7, rack.baseTemp - 2, rack.baseTemp + 2);
           rack.status = rack.temp > 34 ? "critical" : rack.temp > 30 ? "warning" : "healthy";
@@ -1042,7 +1098,7 @@
           walkMapStats();
           updateMapOverlayValues();
         }
-        if (facilityState.phase >= 5 && (facilityState.phase < 8 || ui.mode === VIEW_MODE.FLOOR)) {
+        if (facilityState.phase >= 6 && (facilityState.phase < 8 || ui.mode === VIEW_MODE.FLOOR)) {
           /* The per-rack telemetry pulse is driven by the Three.js
            * render loop directly (scan plane + LED pulse). The
            * inspector still needs a periodic refresh whenever the
@@ -1927,11 +1983,14 @@
         ["LEAD", ui.derived.powerLead || power.primaryLead || "UNSET"],
       ];
     }
+    /* Phase 3 = Compute (was phase 5), Phase 5 = Fiber (was phase 3)
+     * after the v4 reorder. The body of each stat block now reflects
+     * the new content at that phase. */
     if (phase === 3) {
       return [
-        ["FIBER MODEL", FIBER_ACCESS[facilityState.fiber.accessType]?.label || "UNSET"],
-        ["CARRIERS", `${facilityState.fiber.carriers.length}/2+`],
-        ["IXP", ui.derived.ixpLabel || "UNSET"],
+        ["GPU", GPU[facilityState.compute.gpuModel]?.label || "UNSET"],
+        ["RACK KW", `${(ui.derived.rackKw || 0).toFixed(1)} KW`],
+        ["RACKS", INTEGER.format(facilityState.compute.rackCount || 0)],
       ];
     }
     if (phase === 4) {
@@ -1943,9 +2002,9 @@
     }
     if (phase === 5) {
       return [
-        ["GPU", GPU[facilityState.compute.gpuModel]?.label || "UNSET"],
-        ["RACK KW", `${(ui.derived.rackKw || 0).toFixed(1)} KW`],
-        ["RACKS", INTEGER.format(facilityState.compute.rackCount || 0)],
+        ["FIBER MODEL", FIBER_ACCESS[facilityState.fiber.accessType]?.label || "UNSET"],
+        ["CARRIERS", `${facilityState.fiber.carriers.length}/2+`],
+        ["IXP", ui.derived.ixpLabel || "UNSET"],
       ];
     }
     if (phase === 6) {
@@ -2096,7 +2155,7 @@
       ? facilityState.fiber.carriers.reduce((sum, key) => sum + (CARRIER[key]?.quality || 0), 0) / facilityState.fiber.carriers.length
       : 0.7;
 
-    if (facilityState.phase >= 3 && facilityState.fiber.carriers.length < 2) {
+    if (facilityState.phase >= 5 && facilityState.fiber.carriers.length < 2) {
       errors.push(`SELECT AT LEAST TWO CARRIERS (SELECTED ${facilityState.fiber.carriers.length}/2)`);
     }
 
@@ -2491,28 +2550,38 @@
   }
 
   function getGpuLockReason(key) {
+    /* Compute-stack phase (Phase 3) now precedes facility (Phase 4),
+     * so chip choice is NOT constrained by cooling/power-arch -- those
+     * downstream decisions adapt to the chip class instead.
+     *
+     * The only remaining cross-phase locks are the Rubin
+     * dependencies, because Rubin requires UPS=supercap which is set
+     * in Phase 2 (upstream from Phase 3 compute). If the user picked
+     * Li-ion UPS upstream, Rubin is locked until they go back and
+     * change it. */
     const gpu = GPU[key];
     if (!gpu) return "";
 
-    const cooling = facilityState.facility.coolingType;
-
-    if (["b200", "b300", "rubin"].includes(key) && (!cooling || !["d2c", "immersion"].includes(cooling))) {
-      return "REQUIRES D2C OR IMMERSION COOLING";
-    }
-
-    if (key === "h200" && cooling && !["rear", "d2c", "immersion"].includes(cooling)) {
-      return "H200 REQUIRES LIQUID COOLING";
-    }
-
-    if (gpu.needsHvdc && facilityState.facility.powerArchitecture !== "hvdc") {
-      return "RUBIN REQUIRES 800V HVDC + SST";
-    }
-
-    if (gpu.needsSupercap && facilityState.power.upsType !== "supercap") {
-      return "RUBIN REQUIRES SUPERCAP + BESS";
+    if (gpu.needsSupercap && facilityState.power.upsType && facilityState.power.upsType !== "supercap") {
+      return "RUBIN REQUIRES SUPERCAP+BESS UPS (CHANGE PHASE 2)";
     }
 
     return "";
+  }
+
+  /* Cooling options now LOCKED BY THE GPU CHOICE made in Phase 3.
+   * Returns a non-empty lock reason if this cooling type can't pair
+   * with the selected GPU. Used by the Phase 4 cooling picker. */
+  function getCoolingLockReason(key) {
+    const gpu = GPU[facilityState.compute.gpuModel];
+    if (!gpu) return ""; // no GPU picked yet, cooling is unrestricted
+    if (!gpu.cooling || gpu.cooling.includes(key)) return "";
+    /* GPU explicitly does not support this cooling type. */
+    if (["b200", "b300", "rubin"].includes(facilityState.compute.gpuModel) &&
+        ["air", "rear"].includes(key)) {
+      return `${gpu.label} REQUIRES D2C OR IMMERSION (>30 kW/RACK)`;
+    }
+    return `${gpu.label} NOT RATED FOR THIS COOLING TYPE`;
   }
 
   function getArchLockReason(key) {
@@ -2697,11 +2766,15 @@
   }
 
   function isPhaseComplete(phase) {
+    /* Phase ordering reflects the modern AI-DC build sequence -- chip
+     * class is committed (Phase 3) BEFORE facility construction
+     * (Phase 4) because chip choice drives cooling architecture and
+     * slab loading. Fiber (Phase 5) lands after the shell is up. */
     if (phase === 1) return !!(facilityState.site.locationType && facilityState.site.cityKey && facilityState.site.workloadProfile && facilityState.site.acreage && facilityState.site.permittingTrack);
     if (phase === 2) return !!(facilityState.power.targetMW && facilityState.power.redundancyTier && facilityState.power.upsType) && powerTotal() === 100;
-    if (phase === 3) return !!(facilityState.fiber.accessType && facilityState.fiber.ixpRegion && facilityState.fiber.carriers.length >= 2);
+    if (phase === 3) return !!(facilityState.compute.gpuModel && facilityState.compute.gpusPerRack && facilityState.compute.inferenceStack && facilityState.compute.servingArch);
     if (phase === 4) return !!(facilityState.facility.developerType && facilityState.facility.coolingType && facilityState.facility.powerArchitecture);
-    if (phase === 5) return !!(facilityState.compute.gpuModel && facilityState.compute.gpusPerRack && facilityState.compute.inferenceStack && facilityState.compute.servingArch);
+    if (phase === 5) return !!(facilityState.fiber.accessType && facilityState.fiber.ixpRegion && facilityState.fiber.carriers.length >= 2);
     if (phase === 6) return !!(facilityState.networking.intraNode && facilityState.networking.fabric && facilityState.networking.nodeCount && facilityState.networking.externalBandwidth);
     if (phase === 7) return !!(facilityState.dcim.monitoringApproach && facilityState.dcim.maintenanceModel && facilityState.dcim.coolingTelemetry !== null);
     return true;
@@ -2776,14 +2849,19 @@
   }
 
   function decisionHtmlForPhase(phase) {
+    /* Phase 3 + 5 dispatch swapped after the reorder: COMPUTE STACK
+     * is now Phase 3 (was using decisionPhase5 body) and
+     * CONNECTIVITY (FIBER) is now Phase 5 (was using decisionPhase3
+     * body). The decision*-body functions themselves are renamed
+     * SEMANTICALLY -- no body content changes. */
     let body = "";
-    if (phase === 1) body = decisionPhase1();
-    else if (phase === 2) body = decisionPhase2();
-    else if (phase === 3) body = decisionPhase3();
-    else if (phase === 4) body = decisionPhase4();
-    else if (phase === 5) body = decisionPhase5();
-    else if (phase === 6) body = decisionPhase6();
-    else if (phase === 7) body = decisionPhase7();
+    if (phase === 1) body = decisionPhase1();           // Site
+    else if (phase === 2) body = decisionPhase2();      // Power
+    else if (phase === 3) body = decisionPhase5();      // Compute (was 5)
+    else if (phase === 4) body = decisionPhase4();      // Facility
+    else if (phase === 5) body = decisionPhase3();      // Fiber (was 3)
+    else if (phase === 6) body = decisionPhase6();      // Networking
+    else if (phase === 7) body = decisionPhase7();      // DCIM
     else body = `<div class="info-callout">ALL PHASES COMPLETE. SWITCH BETWEEN MAP/FLOOR VIEW OR ENABLE FULL SCREEN FROM THE CENTER CONTROLS.</div>`;
 
     const errorHtml = facilityState.validation.errors.map((msg) => `<div class="critical-callout">${esc(msg)}</div>`).join("");
@@ -3135,15 +3213,20 @@
       inspectKey: key,
     })).join("");
 
-    const coolingCards = Object.entries(COOLING).map(([key, item]) => decisionCard({
-      action: "set-cooling",
-      value: key,
-      title: item.label,
-      lines: [`DENSITY: ${INTEGER.format(item.density)} KW/RACK`, `INSTALL: ${compactMoney(item.perMw)} / MW`, `PUE: ${item.pue[0]}-${item.pue[1]}`],
-      selected: facilityState.facility.coolingType === key,
-      inspectKind: "cooling",
-      inspectKey: key,
-    })).join("");
+    const coolingCards = Object.entries(COOLING).map(([key, item]) => {
+      const lock = getCoolingLockReason(key);
+      return decisionCard({
+        action: "set-cooling",
+        value: key,
+        title: item.label,
+        lines: [`DENSITY: ${INTEGER.format(item.density)} KW/RACK`, `INSTALL: ${compactMoney(item.perMw)} / MW`, `PUE: ${item.pue[0]}-${item.pue[1]}`],
+        selected: facilityState.facility.coolingType === key,
+        locked: !!lock,
+        lock,
+        inspectKind: "cooling",
+        inspectKey: key,
+      });
+    }).join("");
 
     const archCards = Object.entries(ARCH).map(([key, item]) => {
       const lock = getArchLockReason(key);
@@ -3537,21 +3620,47 @@
     const dcPoint = projectGeoPoint(cityGeo.lon, cityGeo.lat);
     const dcx = dcPoint.x;
     const dcy = dcPoint.y;
-    const facilityLabel = `${ui.derived.cityLabel || "SITE"} | ${INTEGER.format(ui.derived.totalGpus || 0)} GPUS | ${(ui.derived.targetMw || 0)} MW | ${(facilityState.compute.totalTFLOPS / 1000 || 0).toFixed(1)} PFLOPS`;
 
-    const projectedCities = CITIES.map((city) => ({ ...city, ...projectGeoPoint(city.lon, city.lat) }));
+    /* The demand-basin profile is keyed by the user's chosen location
+     * type so each DC archetype shows a different traffic signature on
+     * the global map. */
+    const profile =
+      DEMAND_BASIN_PROFILE[facilityState.site.locationType] ||
+      DEMAND_BASIN_PROFILE.rural;
+    const facilityLabel = `${ui.derived.cityLabel || "SITE"} | ${profile.label} | ${INTEGER.format(ui.derived.totalGpus || 0)} GPUS | ${(ui.derived.targetMw || 0)} MW | ${(facilityState.compute.totalTFLOPS / 1000 || 0).toFixed(1)} PFLOPS`;
+
+    /* Filter cities per profile. If activeCities is null, all are
+     * active. Each city gets an `intensity` (0..1) based on local
+     * proximity if the profile asks for a local boost. */
+    const baseCities = profile.activeCities
+      ? CITIES.filter((c) => profile.activeCities.includes(c.label))
+      : CITIES.slice();
+    const projectedCities = baseCities.map((city) => {
+      const p = projectGeoPoint(city.lon, city.lat);
+      let intensity = 1.0;
+      if (profile.localBoost) {
+        /* Closer cities glow brighter, far ones fade toward
+         * profile.intensityFloor. */
+        const d = Math.hypot(p.x - dcx, p.y - dcy);
+        const norm = clamp(1 - d / 700, 0, 1);
+        intensity = profile.intensityFloor + (1 - profile.intensityFloor) * norm;
+      } else {
+        intensity = profile.intensityFloor + 0.15;
+      }
+      return { ...city, ...p, intensity };
+    });
     const worldPaths = (ui.worldPaths && ui.worldPaths.length
       ? ui.worldPaths.map((path) => `<path class="world-land world-outline" d="${path}"></path>`).join("")
       : WORLD_LANDMASSES.map((shape) => `<path class="world-land world-outline" d="${geoPathFromPoints(shape.points)}"></path>`).join(""));
 
     const reqPaths = projectedCities.map((city, idx) => {
       const ctrl = arcControl(city.x, city.y, dcx, dcy);
-      return `<path id="req-${idx}" class="req-arc" d="M${city.x.toFixed(1)} ${city.y.toFixed(1)} Q${ctrl.cx.toFixed(1)} ${ctrl.cy.toFixed(1)} ${dcx.toFixed(1)} ${dcy.toFixed(1)}" data-speed="${0.04 + ctrl.dist * 0.000015}" data-city="${idx}"></path>`;
+      return `<path id="req-${idx}" class="req-arc" style="opacity:${city.intensity.toFixed(2)}" d="M${city.x.toFixed(1)} ${city.y.toFixed(1)} Q${ctrl.cx.toFixed(1)} ${ctrl.cy.toFixed(1)} ${dcx.toFixed(1)} ${dcy.toFixed(1)}" data-speed="${0.04 + ctrl.dist * 0.000015}" data-city="${idx}"></path>`;
     }).join("");
 
     const resPaths = projectedCities.map((city, idx) => {
       const ctrl = arcControl(dcx, dcy, city.x, city.y);
-      return `<path id="res-${idx}" class="res-arc" d="M${dcx.toFixed(1)} ${dcy.toFixed(1)} Q${ctrl.cx.toFixed(1)} ${ctrl.cy.toFixed(1)} ${city.x.toFixed(1)} ${city.y.toFixed(1)}" data-speed="${0.035 + ctrl.dist * 0.000012}" data-city="${idx}"></path>`;
+      return `<path id="res-${idx}" class="res-arc" style="opacity:${city.intensity.toFixed(2)}" d="M${dcx.toFixed(1)} ${dcy.toFixed(1)} Q${ctrl.cx.toFixed(1)} ${ctrl.cy.toFixed(1)} ${city.x.toFixed(1)} ${city.y.toFixed(1)}" data-speed="${0.035 + ctrl.dist * 0.000012}" data-city="${idx}"></path>`;
     }).join("");
 
     const cityNodes = projectedCities.map((city, idx) => {
@@ -4033,9 +4142,11 @@
       const power = ui.derived.powerPortfolio || computePowerPortfolio(facilityState.power.sources);
       return `${facilityState.power.targetMW || 0}MW ${top.join(" + ") || "POWER MIX"} / ${power.firmPct.toFixed(0)}% FIRM`;
     }
-    if (phase === 3) return `${FIBER_ACCESS[facilityState.fiber.accessType]?.label || "FIBER"} / ${facilityState.fiber.carriers.length} CARRIERS / ${IXP[facilityState.fiber.ixpRegion]?.label || "IXP"}`;
+    /* Phase 3 = Compute (was 5), Phase 5 = Fiber (was 3) after the
+     * v4 reorder. */
+    if (phase === 3) return `${GPU[facilityState.compute.gpuModel]?.label || "GPU"} / ${facilityState.compute.gpusPerRack} GPUS PER RACK / ${STACK[facilityState.compute.inferenceStack]?.label || "STACK"}`;
     if (phase === 4) return `${DEVELOPER[facilityState.facility.developerType]?.label || "DEVELOPER"} / ${COOLING[facilityState.facility.coolingType]?.label || "COOLING"}`;
-    if (phase === 5) return `${GPU[facilityState.compute.gpuModel]?.label || "GPU"} / ${facilityState.compute.gpusPerRack} GPUS PER RACK / ${STACK[facilityState.compute.inferenceStack]?.label || "STACK"}`;
+    if (phase === 5) return `${FIBER_ACCESS[facilityState.fiber.accessType]?.label || "FIBER"} / ${facilityState.fiber.carriers.length} CARRIERS / ${IXP[facilityState.fiber.ixpRegion]?.label || "IXP"}`;
     if (phase === 6) return `${INTRA_NODE[facilityState.networking.intraNode]?.label || "INTRA-NODE"} + ${FABRIC[facilityState.networking.fabric]?.label || "FABRIC"} / ${facilityState.networking.nodeCount} NODES / ${EXTERNAL[facilityState.networking.externalBandwidth]?.label || "EXTERNAL"}`;
     if (phase === 7) return `${MONITORING[facilityState.dcim.monitoringApproach]?.label || "MONITORING"} / ${MAINT[facilityState.dcim.maintenanceModel]?.label || "MAINTENANCE"}`;
     return "FACILITY COMPLETE";

@@ -166,12 +166,26 @@
      *   ≥7  DCIM telemetry pulse on rack tops
      *   ≥8  fully lit "facility online" mint glow
      */
+    /* Phase-gating after the v4 reorder (Compute moved to Phase 3,
+     * Fiber moved to Phase 5):
+     *
+     *   Phase 1  site + permits
+     *   Phase 2  power yard rises (gensets/BESS/transformer/etc.)
+     *   Phase 3  compute commit -- chip "shipping crates" appear on
+     *            the dock (chips on order, not yet installed)
+     *   Phase 4  facility shell + cooling + interior rooms
+     *   Phase 5  fiber pulled into the MMR
+     *   Phase 6  racks + spine fabric land in the data hall
+     *   Phase 7  DCIM telemetry sweep
+     *   Phase 8  facility online
+     */
     const showBuilding   = phase >= 2;
+    const showComputeCommitted = phase >= 3;
     const showRoof       = phase >= 4;
     const showInterior   = phase >= 4;
     const showCooling    = phase >= 4;
-    const showFiber      = phase >= 3;
-    const showRacks      = phase >= 5;
+    const showFiber      = phase >= 5;
+    const showRacks      = phase >= 6;
     const showSpine      = phase >= 6;
     const showTelemetry  = phase >= 7;
     const fullyOnline    = phase >= 8;
@@ -4059,6 +4073,40 @@
         });
       }
 
+      /* Intra-row node fabric — thin glowing strand running along
+       * each rack row at rack-top height. Represents the NVLink (for
+       * NVLink-Switch domains within a node) and the InfiniBand /
+       * RoCE links between racks of the same node. Gated on
+       * Phase 6+ alongside the spine HDA. */
+      if (showSpine && racks.rowLabels) {
+        const intraMat = new THREE.MeshBasicMaterial({
+          color: 0x6dd6ff, transparent: true, opacity: 0.85,
+        });
+        racks.rowLabels.forEach((row) => {
+          const [rx, , rz] = svgToWorld(dh.x + dh.w / 2, row.cy);
+          const cable = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.025, 0.025, sw(dh.w) * 0.84, 6),
+            intraMat,
+          );
+          cable.rotation.z = Math.PI / 2;
+          cable.position.set(rx, RACK_HEIGHT + 0.12, rz);
+          worldGroup.add(cable);
+          /* Connection nodes at each rack -- small bright pins where
+           * the fabric meets the rack. Tiny LEDs along the strand. */
+          const nodeCount = 5;
+          for (let n = 0; n < nodeCount; n++) {
+            const t = (n + 1) / (nodeCount + 1);
+            const px = rx - sw(dh.w) * 0.42 + sw(dh.w) * 0.84 * t;
+            const pin = new THREE.Mesh(
+              new THREE.SphereGeometry(0.05, 6, 5),
+              intraMat,
+            );
+            pin.position.set(px, RACK_HEIGHT + 0.12, rz);
+            worldGroup.add(pin);
+          }
+        });
+      }
+
       /* Spine / network overlay — Phase 6+ once the user has chosen
        * fabric + node count. */
       if (showSpine && racks.clusters && racks.clusters.length > 0) {
@@ -4615,7 +4663,13 @@
                     : nonFirmPct >= 30 ? 3
                     : 2;
     if (upsType) {
-      const bx = yardX + 9;
+      /* Anti-overlap: yardX is already -bldgW/2 - sw(120), so the
+       * power yard sits ~7.2 world units west of the building. The
+       * earlier +9 offset would pull BESS east of the building's
+       * west edge -- a render-into-the-shell bug. Cap to +4 so the
+       * BESS pad still hugs the gensets but stays clear of the
+       * facility footprint regardless of building size. */
+      const bx = yardX + 4;
       const bz = yardZ0;
       addPad(bx, bz, 5, 5, 0x1a2530);
 
