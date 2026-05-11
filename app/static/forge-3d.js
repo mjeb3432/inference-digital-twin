@@ -1516,59 +1516,92 @@
           parapet.position.y = bh + 0.18;
           blockGroup.add(parapet);
 
-          /* Roof HVAC cluster — 2-3 condenser units */
+          /* Roof HVAC cluster — 2-3 visible condenser units.
+           * Bumped from 0.9 / 0.45 / 0.7 to 1.2 / 0.6 / 0.9 so they
+           * actually read from typical orbit distance. Previously
+           * QA showed the roofs looking flat because the HVAC was
+           * too small to register at 40m camera range. */
           const hvacCount = 2 + (i % 2);
           for (let h = 0; h < hvacCount; h++) {
             const hvac = new THREE.Mesh(
-              roundedBox(0.9, 0.45, 0.7, 0.04),
+              roundedBox(1.2, 0.6, 0.9, 0.05),
               hvacMat,
             );
             hvac.position.set(
               -bw * 0.25 + h * (bw * 0.25),
-              bh + 0.6,
+              bh + 0.65,
               -bd * 0.2,
             );
+            hvac.castShadow = true;
             blockGroup.add(hvac);
             /* Fan grille on top */
             const grille = new THREE.Mesh(
-              new THREE.TorusGeometry(0.22, 0.025, 6, 16),
+              new THREE.TorusGeometry(0.28, 0.03, 6, 16),
               antennaMat,
             );
             grille.rotation.x = Math.PI / 2;
             grille.position.set(
               -bw * 0.25 + h * (bw * 0.25),
-              bh + 0.85,
+              bh + 0.96,
               -bd * 0.2,
             );
             blockGroup.add(grille);
           }
 
-          /* Every 4th building gets an antenna or satellite */
-          if (i % 4 === 0) {
+          /* EVERY building gets either an antenna mast OR a dish so
+           * no roof reads as bare. QA reported "the roofs of houses
+           * are different" -- which translated to "some buildings
+           * have visible top-of-roof features and others don't",
+           * making the cityscape feel inconsistent. Three rotating
+           * archetypes: mast, dish, AC-tower trio. */
+          const roofKind = i % 3;
+          if (roofKind === 0) {
+            /* Antenna mast with cross arms */
             const mast = new THREE.Mesh(
-              new THREE.CylinderGeometry(0.04, 0.04, 1.6, 6),
+              new THREE.CylinderGeometry(0.05, 0.05, 1.8, 6),
               antennaMat,
             );
-            mast.position.set(bw * 0.3, bh + 1.0, bd * 0.25);
+            mast.position.set(bw * 0.3, bh + 1.05, bd * 0.25);
             blockGroup.add(mast);
-            /* Cross arms */
             for (let a = 0; a < 3; a++) {
               const arm = new THREE.Mesh(
-                new THREE.BoxGeometry(0.45 - a * 0.08, 0.025, 0.025),
+                new THREE.BoxGeometry(0.5 - a * 0.09, 0.03, 0.03),
                 antennaMat,
               );
-              arm.position.set(bw * 0.3, bh + 1.4 - a * 0.32, bd * 0.25);
+              arm.position.set(bw * 0.3, bh + 1.55 - a * 0.32, bd * 0.25);
               blockGroup.add(arm);
             }
-          } else if (i % 5 === 0) {
-            /* Dish */
+          } else if (roofKind === 1) {
+            /* Satellite dish */
             const dish = new THREE.Mesh(
-              new THREE.SphereGeometry(0.32, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2.2),
+              new THREE.SphereGeometry(0.4, 14, 9, 0, Math.PI * 2, 0, Math.PI / 2.2),
               antennaMat,
             );
             dish.rotation.x = -0.3;
-            dish.position.set(bw * 0.25, bh + 0.55, bd * 0.3);
+            dish.position.set(bw * 0.25, bh + 0.7, bd * 0.3);
+            dish.castShadow = true;
             blockGroup.add(dish);
+            /* Dish stand */
+            const stand = new THREE.Mesh(
+              new THREE.CylinderGeometry(0.04, 0.05, 0.45, 6),
+              antennaMat,
+            );
+            stand.position.set(bw * 0.25, bh + 0.45, bd * 0.3);
+            blockGroup.add(stand);
+          } else {
+            /* Cooling tower trio — three short cylinders */
+            for (let t = 0; t < 3; t++) {
+              const tower = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.18, 0.18, 0.65, 12),
+                antennaMat,
+              );
+              tower.position.set(
+                bw * 0.28,
+                bh + 0.5,
+                -bd * 0.3 + t * 0.4,
+              );
+              blockGroup.add(tower);
+            }
           }
 
           worldGroup.add(blockGroup);
@@ -1681,10 +1714,25 @@
           shell.receiveShadow = true;
           wh.add(shell);
 
-          /* Sawtooth roof — series of triangular monitors angled
-           * north for daylighting (the classic factory silhouette) */
+          /* Sawtooth roof — series of triangular monitors. QA found
+           * the prism was MIS-CENTERED on the warehouse width: the
+           * translate happened on the X-axis BEFORE the rotateY,
+           * but the extrusion was along Z. After rotation the prism's
+           * long axis ran from X=0 to X=p.w-0.4 instead of
+           * x in [-(p.w-0.4)/2, +(p.w-0.4)/2] — so it appeared shifted
+           * to one side of the warehouse, producing what looked like
+           * a flat slab rather than a clean sawtooth pattern. Fix:
+           * translate on the EXTRUSION axis (Z) BEFORE the rotation
+           * so the post-rotation X is centered. */
           const teeth = Math.max(3, Math.floor(p.d / 3));
           const toothW = p.d / teeth;
+          const halfExtrude = (p.w - 0.4) / 2;
+          /* Shared glass material (only need one per warehouse, not
+           * per-tooth — previously allocated N times). */
+          const glassMat = new THREE.MeshStandardMaterial({
+            color: 0xa6c4d6, roughness: 0.25, metalness: 0.75,
+            transparent: true, opacity: 0.55, envMapIntensity: 0.85,
+          });
           for (let s = 0; s < teeth; s++) {
             const toothShape = new THREE.Shape();
             toothShape.moveTo(0, 0);
@@ -1695,22 +1743,33 @@
               depth: p.w - 0.4,
               bevelEnabled: false,
             });
-            toothGeo.translate(-(p.w - 0.4) / 2, 0, 0);
+            /* Center along the extrusion axis (Z) BEFORE rotating.
+             * After rotateY(PI/2) Z becomes X, so the prism is
+             * centered on the warehouse's long axis (X). */
+            toothGeo.translate(0, 0, -halfExtrude);
             toothGeo.rotateY(Math.PI / 2);
             const tooth = new THREE.Mesh(toothGeo, warehouseMat);
             tooth.position.set(0, p.h, -p.d / 2 + s * toothW);
             tooth.castShadow = true;
             wh.add(tooth);
-            /* Glass face on the angled side */
-            const glassGeo = new THREE.PlaneGeometry(p.w - 0.4, 1.05);
-            const glassMat = new THREE.MeshStandardMaterial({
-              color: 0xa6c4d6, roughness: 0.25, metalness: 0.75,
-              transparent: true, opacity: 0.55,
-            });
+            /* Glass face on the angled side. Width = warehouse length
+             * (post-translate X-axis), height = hypotenuse of the
+             * triangle. Position along Z to match the tooth's vertical
+             * (north) face. */
+            const hypotenuse = Math.sqrt(toothW * toothW + 0.85 * 0.85);
+            const glassGeo = new THREE.PlaneGeometry(p.w - 0.4, hypotenuse);
             const glass = new THREE.Mesh(glassGeo, glassMat);
-            glass.position.set(0, p.h + 0.45, -p.d / 2 + s * toothW + toothW * 0.05);
-            glass.rotation.x = -Math.atan2(0.85, toothW) + Math.PI;
-            glass.rotation.y = -Math.PI / 2;
+            const slope = Math.atan2(0.85, toothW);
+            /* Glass sits along the hypotenuse: from (toothW, 0) up to
+             * (0, 0.85) in shape space. Midpoint (toothW/2, 0.425) in
+             * tooth-local coordinates -> world Y = p.h + 0.425. */
+            glass.position.set(
+              0,
+              p.h + 0.425,
+              -p.d / 2 + s * toothW + toothW / 2,
+            );
+            /* Rotate so plane normal points OUT of the slope (north). */
+            glass.rotation.set(-slope, Math.PI / 2, 0, "YXZ");
             wh.add(glass);
           }
 
