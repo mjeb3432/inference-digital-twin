@@ -138,12 +138,48 @@
     lightpath: { label: "LIGHTPATH", tier: "TIER 3", mrc: 22000, quality: 0.78 },
   };
 
+  /* Real carrier-hotel Internet eXchange Points the user can land
+   * fiber on. `geo` is the actual address of the dominant facility
+   * in each metro, so distance from the chosen site city becomes a
+   * proper haversine computation rather than a flat default.
+   *
+   * Subsea-flag indicates direct subsea cable access at that IXP --
+   * affects routes to APAC/EMEA latency.
+   */
   const IXP = {
-    va: { label: "NORTHERN VA", miles: 4, latency: 2.1, subsea: true },
-    dallas: { label: "DALLAS", miles: 9, latency: 5.6, subsea: false },
-    chicago: { label: "CHICAGO", miles: 11, latency: 7.8, subsea: false },
-    sv: { label: "SILICON VALLEY", miles: 26, latency: 18.4, subsea: true },
+    va:      { label: "ASHBURN/NORTHERN VA (EQUINIX DC)",   geo: { lon: -77.49, lat: 39.04 }, subsea: true  },
+    dallas:  { label: "DALLAS (INFOMART)",                  geo: { lon: -96.81, lat: 32.78 }, subsea: false },
+    chicago: { label: "CHICAGO (350 E CERMAK)",             geo: { lon: -87.62, lat: 41.85 }, subsea: false },
+    sv:      { label: "SILICON VALLEY (EQUINIX SV1-15)",    geo: { lon: -121.89, lat: 37.33 }, subsea: true  },
+    atlanta: { label: "ATLANTA (56 MARIETTA)",              geo: { lon: -84.39, lat: 33.76 }, subsea: false },
+    seattle: { label: "SEATTLE (WESTIN BUILDING)",          geo: { lon: -122.33, lat: 47.61 }, subsea: true  },
+    london:  { label: "LONDON (TELEHOUSE NORTH)",           geo: { lon:  -0.01, lat: 51.50 }, subsea: true  },
+    amsterdam: { label: "AMSTERDAM (AMS-IX)",               geo: { lon:   4.94, lat: 52.30 }, subsea: true  },
+    frankfurt: { label: "FRANKFURT (DE-CIX)",               geo: { lon:   8.68, lat: 50.11 }, subsea: false },
+    singapore: { label: "SINGAPORE (EQUINIX SG1)",          geo: { lon: 103.85, lat:  1.35 }, subsea: true  },
+    tokyo:   { label: "TOKYO (EQUINIX TY11)",               geo: { lon: 139.69, lat: 35.69 }, subsea: true  },
+    sydney:  { label: "SYDNEY (EQUINIX SY3)",               geo: { lon: 151.21, lat: -33.87 }, subsea: true },
   };
+
+  /* Great-circle distance (haversine) in miles. */
+  function haversineMiles(a, b) {
+    const toRad = (d) => (d * Math.PI) / 180;
+    const R = 3958.7613; // Earth radius in miles
+    const dLat = toRad(b.lat - a.lat);
+    const dLon = toRad(b.lon - a.lon);
+    const lat1 = toRad(a.lat);
+    const lat2 = toRad(b.lat);
+    const x =
+      Math.sin(dLat / 2) ** 2 +
+      Math.sin(dLon / 2) ** 2 * Math.cos(lat1) * Math.cos(lat2);
+    return 2 * R * Math.asin(Math.min(1, Math.sqrt(x)));
+  }
+
+  /* One-way fiber latency from speed-of-light in glass (~2/3 of c).
+   * ~8.21 microseconds per mile, round-trip ~12.4. We model one-way. */
+  function fiberLatencyMs(miles) {
+    return miles * 0.00821;
+  }
 
   const DEVELOPER = {
     t3: { label: "LARGE-SCALE DEVELOPER (TIER 3)", cost: [10_800_000, 12_600_000], perMw: 11_700_000, months: [14, 22], factor: 1 },
@@ -182,18 +218,42 @@
    */
   const GPU = {
     h100: { label: "H100 SXM5",        kw: 0.70, vram: 80,  hbmTbs: 3.35, pf: 3.35, cost: 25000, series: "H", cooling: ["air", "rear", "d2c", "immersion"] },
-    h200: { label: "H200 SXM5",        kw: 0.70, vram: 141, hbmTbs: 4.80, pf: 3.95, cost: 30000, series: "H", cooling: ["rear", "d2c", "immersion"] },
+    h200: { label: "H200 SXM5",        kw: 0.70, vram: 141, hbmTbs: 4.80, pf: 3.95, cost: 30000, series: "H", cooling: ["air", "rear", "d2c", "immersion"] },
     b200: { label: "B200 SXM5",        kw: 1.35, vram: 192, hbmTbs: 8.00, pf: 9.00, cost: 40000, series: "B", cooling: ["d2c", "immersion"] },
     b300: { label: "B300 HGX",         kw: 1.35, vram: 288, hbmTbs: 8.00, pf: 10.0, cost: 50000, series: "B", cooling: ["d2c", "immersion"] },
     rubin: { label: "RUBIN ULTRA (2027)", kw: 3.6, vram: 384, hbmTbs: 13.0, pf: 20.0, cost: 95000, series: "R", cooling: ["d2c", "immersion"], needsHvdc: true, needsSupercap: true, rackKw: 900 },
   };
 
+  /* Inference serving runtimes. Each row is a real published stack
+   * with characteristic MFU and TTFT seed multipliers from public
+   * benchmarks:
+   *
+   *   vllm        UC Berkeley's PagedAttention engine. Production-
+   *               standard for high-throughput batched inference.
+   *               vLLM SOSP '23 (Kwon et al.).
+   *   trt         NVIDIA TensorRT-LLM. Kernel-fused, FP8-native, MAX
+   *               TPS on NVIDIA hardware. Public MFU benchmarks 45-70%.
+   *   pytorch     Raw PyTorch / Eager mode. Reference baseline -- what
+   *               every researcher starts with. No batching, no kernel
+   *               fusion, lowest TPS but most flexible.
+   *   inferx      InferX (Recursion AI / startups). Cold-start-fast
+   *               serverless runtime. Lower steady MFU but near-zero
+   *               container spin-up latency.
+   *   triton      NVIDIA Triton Inference Server. Multi-model, multi-
+   *               framework. Production multi-tenancy.
+   *   tgi         Text Generation Inference (HuggingFace). Production
+   *               multi-tenant + telemetry-heavy.
+   *   ollama      Local-friendly llama.cpp wrapper. Low setup cost,
+   *               low MFU. Good for dev / small deployments.
+   */
   const STACK = {
-    ollama: { label: "OLLAMA", best: "LOCAL/SIMPLE", mfu: [0.2, 0.35], seedTps: 0.62, seedTtft: 1.3 },
-    vllm: { label: "VLLM", best: "PRODUCTION", mfu: [0.35, 0.55], seedTps: 0.92, seedTtft: 0.92 },
-    triton: { label: "NVIDIA TRITON", best: "MULTI-MODEL", mfu: [0.32, 0.5], seedTps: 0.86, seedTtft: 0.97 },
-    trt: { label: "TENSORRT-LLM", best: "MAX TPS", mfu: [0.45, 0.7], seedTps: 1.0, seedTtft: 0.78, needsHbr: true },
-    tgi: { label: "TGI BY HUGGINGFACE", best: "MULTI-TENANT", mfu: [0.3, 0.48], seedTps: 0.81, seedTtft: 1.05 },
+    vllm:    { label: "vLLM",            best: "PRODUCTION",    mfu: [0.35, 0.55], seedTps: 0.92, seedTtft: 0.92 },
+    trt:     { label: "TENSORRT-LLM",    best: "MAX TPS",       mfu: [0.45, 0.7],  seedTps: 1.00, seedTtft: 0.78, needsHbr: true },
+    pytorch: { label: "PYTORCH",         best: "RESEARCH",      mfu: [0.22, 0.38], seedTps: 0.65, seedTtft: 1.25 },
+    inferx:  { label: "INFERX",          best: "SERVERLESS",    mfu: [0.30, 0.50], seedTps: 0.88, seedTtft: 0.85 },
+    triton:  { label: "NVIDIA TRITON",   best: "MULTI-MODEL",   mfu: [0.32, 0.50], seedTps: 0.86, seedTtft: 0.97 },
+    tgi:     { label: "TGI BY HUGGINGFACE", best: "MULTI-TENANT", mfu: [0.30, 0.48], seedTps: 0.81, seedTtft: 1.05 },
+    ollama:  { label: "OLLAMA",          best: "LOCAL/SIMPLE",  mfu: [0.20, 0.35], seedTps: 0.62, seedTtft: 1.30 },
   };
 
   const SERVING = {
@@ -699,6 +759,8 @@
       "inspectorDetails",
       "inspectorMetrics",
       "inspectorViz",
+      "liveStatusLine",
+      "liveStatusText",
     ].forEach((id) => {
       el[id] = $(id);
     });
@@ -1268,7 +1330,7 @@
     return `
       <div class="range-control">
         <button type="button" class="range-nudge" data-action="range-bump" data-target-action="${action}" data-delta="-${step}" ${shared} aria-label="Decrease">−</button>
-        <input class="range-number" type="number" min="${min}" max="${max}" step="${step}" value="${Math.round(value)}" data-action="${action}" ${shared} inputmode="numeric" />
+        <input class="range-number" type="text" inputmode="numeric" pattern="[0-9]*" data-min="${min}" data-max="${max}" data-step="${step}" value="${Math.round(value)}" data-action="${action}" ${shared} />
         <button type="button" class="range-nudge" data-action="range-bump" data-target-action="${action}" data-delta="${step}" ${shared} aria-label="Increase">+</button>
       </div>
     `;
@@ -2038,7 +2100,18 @@
       errors.push(`SELECT AT LEAST TWO CARRIERS (SELECTED ${facilityState.fiber.carriers.length}/2)`);
     }
 
-    const latency = ixp ? clamp(ixp.latency + (1 - quality) * 8 + (workload ? (workload.demandFactor - 1) * 3.5 : 0), 1, 35) : 0;
+    /* IXP latency derived from real distance now that both city and
+     * IXP carry geo coords. Speed-of-light-in-fiber is ~2/3 of c, so
+     * one-way latency ~8.21 us per mile. Carrier quality + workload
+     * demand factor are pile-on terms representing the queueing/
+     * route-quality penalty at the IXP itself. */
+    const ixpMiles = ixp && city
+      ? haversineMiles(city.geo, ixp.geo)
+      : (ixp ? 50 : 0);
+    const ixpBaseMs = fiberLatencyMs(ixpMiles);
+    const latency = ixp
+      ? clamp(ixpBaseMs + (1 - quality) * 8 + (workload ? (workload.demandFactor - 1) * 3.5 : 0), 1, 80)
+      : 0;
     const cityFiberMiles = city ? city.fiberMiles : (loc ? loc.fiberMiles : 8);
     const fiberCapex = access
       ? access.capex + (facilityState.fiber.accessType === "build" ? Math.max(0, cityFiberMiles - 5) * 250000 : 0)
@@ -2690,6 +2763,16 @@
     el.annualOpex.textContent = compactMoney(facilityState.economics.annualOpex);
     el.targetPue.textContent = (facilityState.facility.pue || 2).toFixed(2);
     el.uptimeProjection.textContent = `${(ui.derived.uptime || 0).toFixed(3)}%`;
+    /* Top-of-left-rail live status flips construction → online at
+     * Phase 8 so the user sees the facility has transitioned out of
+     * construction mode at a glance. */
+    if (el.liveStatusText) {
+      el.liveStatusText.textContent =
+        facilityState.phase === 8 ? "FACILITY ONLINE" : "UNDER CONSTRUCTION";
+    }
+    if (el.liveStatusLine) {
+      el.liveStatusLine.classList.toggle("live-line-online", facilityState.phase === 8);
+    }
   }
 
   function decisionHtmlForPhase(phase) {
@@ -3007,11 +3090,28 @@
       inspectKey: key,
     })).join("");
 
-    const ixpCards = Object.entries(IXP).map(([key, item]) => decisionCard({
+    /* IXP cards now show REAL distance + latency from the user's
+     * chosen city via haversine, not hard-coded defaults. The cards
+     * are sorted by distance so the closest options appear first. */
+    const siteCity = SITE_CITIES[facilityState.site.cityKey];
+    const ixpEntries = Object.entries(IXP).map(([key, item]) => {
+      const miles = siteCity ? haversineMiles(siteCity.geo, item.geo) : NaN;
+      const ms = Number.isFinite(miles) ? fiberLatencyMs(miles) : NaN;
+      return { key, item, miles, ms };
+    });
+    if (siteCity) ixpEntries.sort((a, b) => a.miles - b.miles);
+    const ixpCards = ixpEntries.map(({ key, item, miles, ms }) => decisionCard({
       action: "set-ixp",
       value: key,
       title: item.label,
-      lines: [`DISTANCE: ${item.miles} MI`, `LATENCY: ${item.latency.toFixed(1)} MS`, `SUBSEA: ${item.subsea ? "Y" : "N"}`],
+      lines: siteCity ? [
+        `DISTANCE: ${Math.round(miles)} MI`,
+        `LATENCY: ${ms.toFixed(1)} MS (1-WAY)`,
+        `SUBSEA: ${item.subsea ? "Y" : "N"}`,
+      ] : [
+        "DISTANCE: SELECT CITY FIRST",
+        `SUBSEA: ${item.subsea ? "Y" : "N"}`,
+      ],
       selected: facilityState.fiber.ixpRegion === key,
       inspectKind: "ixp",
       inspectKey: key,
@@ -3856,7 +3956,7 @@
           <div class="inline-controls">
             <label>MODEL SIZE<select data-action="bench-model">${Object.keys(MODEL).map((m) => `<option value="${m}" ${ui.bench.model === m ? "selected" : ""}>${m}</option>`).join("")}</select></label>
             <label>PROMPT TOKENS<select data-action="bench-prompt">${[128, 512, 2048].map((n) => `<option value="${n}" ${ui.bench.prompt === n ? "selected" : ""}>${n}</option>`).join("")}</select></label>
-            <label>BATCH SIZE<input type="number" min="1" max="16384" value="${ui.bench.batch}" data-action="bench-batch" /></label>
+            <label>BATCH SIZE<input type="text" inputmode="numeric" pattern="[0-9]*" data-min="1" data-max="16384" value="${ui.bench.batch}" data-action="bench-batch" /></label>
           </div>
           <div class="value-line"><span>SIMULATED TTFT</span><strong>${b.ttft.toFixed(1)} MS</strong></div>
           <div class="gauge-bar"><span class="gauge-fill ${ttftClass}" style="width:${clamp((b.ttft / 1000) * 100, 2, 100)}%"></span></div>
@@ -3867,8 +3967,8 @@
         <article class="bench-card">
           <h4 title="TPS = sustained generated tokens per second.">TPS (TOKENS PER SECOND)</h4>
           <div class="inline-controls two">
-            <label>OUTPUT LENGTH<input type="number" min="1" max="262144" value="${ui.bench.output}" data-action="bench-output" /></label>
-            <label>CONCURRENCY<input type="number" min="1" max="100000" value="${ui.bench.conc}" data-action="bench-conc" /></label>
+            <label>OUTPUT LENGTH<input type="text" inputmode="numeric" pattern="[0-9]*" data-min="1" data-max="262144" value="${ui.bench.output}" data-action="bench-output" /></label>
+            <label>CONCURRENCY<input type="text" inputmode="numeric" pattern="[0-9]*" data-min="1" data-max="100000" value="${ui.bench.conc}" data-action="bench-conc" /></label>
           </div>
           <div class="value-line"><span>THEORETICAL PEAK</span><strong>${b.peak.toFixed(1)}</strong></div>
           <div class="value-line"><span>ACHIEVED TPS</span><strong>${b.tps.toFixed(1)}</strong></div>
@@ -3891,7 +3991,7 @@
         <article class="bench-card">
           <h4 title="MFU = effective model FLOP utilization as a percentage of peak FLOPS.">MFU (MODEL FLOP UTILIZATION)</h4>
           <label class="inline-controls one"><span class="muted">CALIBRATION MODE (ASSUMPTION INPUTS)</span><input type="checkbox" data-action="bench-calibration-mode" ${ui.bench.calibrationMode ? "checked" : ""} /></label>
-          ${ui.bench.calibrationMode ? `<label>ASSUMED OBSERVED TPS<input type="number" min="1" max="100000000" step="1" value="${Math.max(1, Math.round(ui.bench.assumedObservedTps || 1))}" data-action="bench-assumed-observed" /></label>` : `<div class="muted">OBSERVED TPS IS MODEL OUTPUT (READ-ONLY) WHEN CALIBRATION MODE IS OFF.</div>`}
+          ${ui.bench.calibrationMode ? `<label>ASSUMED OBSERVED TPS<input type="text" inputmode="numeric" pattern="[0-9]*" data-min="1" data-max="100000000" value="${Math.max(1, Math.round(ui.bench.assumedObservedTps || 1))}" data-action="bench-assumed-observed" /></label>` : `<div class="muted">OBSERVED TPS IS MODEL OUTPUT (READ-ONLY) WHEN CALIBRATION MODE IS OFF.</div>`}
           <svg class="mfu-ring" viewBox="0 0 124 124">
             <circle class="base" cx="62" cy="62" r="52"></circle>
             <circle class="val" cx="62" cy="62" r="52" stroke="${mfuColor}" style="stroke-dasharray:${ring};stroke-dashoffset:${ringOffset};"></circle>
@@ -3950,7 +4050,11 @@
 
     el.inspectorDetails.innerHTML = details.rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("");
     el.inspectorMetrics.innerHTML = details.metrics.map(([k, v]) => `<div class="metric-chip"><span>${esc(k)}</span><strong>${esc(v)}</strong></div>`).join("");
-    el.inspectorViz.innerHTML = details.viz;
+    /* The VISUAL CONTEXT panel was retired -- el.inspectorViz is now
+     * `null` from the lookup. Guard so the renderer doesn't throw. */
+    if (el.inspectorViz) {
+      el.inspectorViz.innerHTML = details.viz;
+    }
   }
 
   function phaseSummaryInspect() {

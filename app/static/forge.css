@@ -177,6 +177,16 @@ input[type="number"], select,
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
+/* Phase-8 "facility online" state -- the live-line goes from amber-
+ * neutral "UNDER CONSTRUCTION" to bright mint "FACILITY ONLINE" with
+ * a subtle glow so the transition reads visibly. */
+.live-line-online {
+  color: #33fbd3;
+  text-shadow: 0 0 6px rgba(51, 251, 211, 0.5);
+}
+.live-line-online .led.live {
+  box-shadow: 0 0 8px rgba(51, 251, 211, 0.7);
+}
 
 .rail-width-controls { display: inline-flex; align-items: center; gap: 4px; }
 

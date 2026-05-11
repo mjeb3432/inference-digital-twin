@@ -3427,15 +3427,10 @@
       worldGroup.add(signText);
     }
 
-    /* ---------- Floor grid inside building ---------- */
-    const grid = new THREE.GridHelper(
-      Math.max(sw(bldg.w), sw(bldg.h)) * 1.2,
-      Math.max(8, Math.round(Math.max(sw(bldg.w), sw(bldg.h)) / 4)),
-      0x1a3a36,
-      0x10221f
-    );
-    grid.position.y = 0.011;
-    worldGroup.add(grid);
+    /* The site-floor GridHelper was removed -- the user reported the
+     * horizontal grid lines across the floor were too "Tron-grid" and
+     * fought the realism of the textured concrete slab. The PolyHaven
+     * concrete texture is now the only thing the floor reads as. */
 
     /* Each room is a coloured floor pad + an optional taller "rack" of
      * generic equipment so the user perceives volume. The colours

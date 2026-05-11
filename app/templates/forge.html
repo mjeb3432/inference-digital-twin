@@ -213,8 +213,8 @@
   <!-- WebGL2 intro (vanilla, no three.js dep) -->
   <script src="/static/intro.js?v=20260425c" defer></script>
   <!-- Three.js-driven 3D data centre — lazy-loads Three from CDN on first activation. -->
-  <script src="/static/forge-3d.js?v=20260505e" defer></script>
-  <script src="/static/forge.js?v=20260505e" defer></script>
+  <script src="/static/forge-3d.js?v=20260505f" defer></script>
+  <script src="/static/forge.js?v=20260505f" defer></script>
 
   <div class="desktop-banner" role="status">BEST VIEWED ON DESKTOP (1024PX+)</div>
   <div class="forge-backdrop" aria-hidden="true"></div>
@@ -230,7 +230,7 @@
             <button id="leftRailWideButton" class="ghost-button rail-size-btn" type="button" aria-label="Widen left panel">+</button>
           </div>
         </div>
-        <p class="live-line"><span class="led live"></span>UNDER CONSTRUCTION</p>
+        <p class="live-line" id="liveStatusLine"><span class="led live"></span><span id="liveStatusText">UNDER CONSTRUCTION</span></p>
       </header>
 
       <section class="left-panel">
@@ -265,7 +265,7 @@
       <header class="canvas-header">
         <div>
           <p class="kicker">CENTER CANVAS</p>
-          <h2 id="canvasTitle">LIVE CONSTRUCTION VIEW</h2>
+          <h2 id="canvasTitle">PHASE 1 — SITE SELECTION &amp; PERMITTING</h2>
         </div>
         <div class="canvas-actions">
           <span id="siteStatusTag" class="status-tag"><span class="led live"></span>SITE ACQUIRED</span>
@@ -307,10 +307,6 @@
         <div id="inspectorMetrics" class="inspector-metrics"></div>
       </section>
 
-      <section class="right-panel">
-        <h2>VISUAL CONTEXT</h2>
-        <div id="inspectorViz" class="inspector-viz"></div>
-      </section>
     </aside>
   </div>
   <div id="helpPopoverLayer" class="help-popover-layer" hidden></div>

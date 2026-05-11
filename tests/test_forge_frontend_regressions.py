@@ -178,11 +178,18 @@ def test_left_rail_has_single_scroll_surface_and_no_nested_auto_scroll() -> None
 
 
 def test_range_control_uses_plus_minus_and_number_input_without_slider() -> None:
+    """Range controls are - / typed-text / + with a numeric inputmode.
+    We use type=text (not type=number) so that selectionStart /
+    setSelectionRange work for the focus-preservation helper — Chrome
+    and Firefox don't expose these on type=number inputs, which is
+    what caused the "have to re-click after each digit" complaint."""
     source = load_source()
     body = between(source, "function rangeControl({ action, value, min, max, step = 1, key = null })", "function helpPopover(text, key = \"\")")
 
     assert "data-action=\"range-bump\"" in body
-    assert "class=\"range-number\" type=\"number\"" in body
+    assert "class=\"range-number\"" in body
+    assert "type=\"text\"" in body
+    assert "inputmode=\"numeric\"" in body
     assert "type=\"range\"" not in body
     assert body.find("data-delta=\"-${step}\"") < body.find("class=\"range-number\"")
     assert body.find("class=\"range-number\"") < body.find("data-delta=\"${step}\"")
