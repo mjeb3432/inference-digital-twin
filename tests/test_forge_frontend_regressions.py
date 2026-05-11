@@ -35,13 +35,19 @@ def test_carrier_validation_message_shows_selected_count() -> None:
     assert "SELECT AT LEAST TWO CARRIERS (SELECTED ${facilityState.fiber.carriers.length}/2)" in source
 
 
-def test_visual_context_label_is_driven_by_view_mode() -> None:
+def test_visual_context_card_shows_facility_online_at_phase_8() -> None:
+    """At Phase 8 the inspector viz card flips to a clearly-marked
+    FACILITY ONLINE state with the mint glow style. Earlier this card
+    forked on view mode (map vs floor) but the 2D map view has been
+    retired, so the label now just reflects construction vs online."""
     source = load_source()
     body = between(source, "function phaseSummaryInspect()", "function inspectFor(kind, key)")
 
-    assert "ui.mode === VIEW_MODE.MAP" in body
-    assert "GLOBAL TOKEN ROUTING MAP ACTIVE" in body
-    assert "FACILITY FLOOR TELEMETRY ACTIVE" in body
+    assert "UNDER CONSTRUCTION MODE ACTIVE" in body
+    assert "FACILITY ONLINE" in body
+    # The phase-8 card uses the live-state CSS class so it visually
+    # pops vs the muted construction state.
+    assert "viz-card-online" in body
 
 
 def test_map_view_uses_geo_projection_not_hardcoded_xy_points() -> None:
@@ -100,12 +106,46 @@ def test_gbps_to_gbps_conversion_is_explicit() -> None:
 
 
 def test_continuous_decision_inputs_use_lightweight_render_path() -> None:
+    """The non-continuous re-render path must:
+      1) Preserve left-rail scroll (so the panel doesn't snap to top)
+      2) Preserve INPUT focus + caret (so typing a digit doesn't yank
+         the user out of the field) — added Nov 2026 after users
+         reported having to re-click the power-% inputs after each
+         keystroke.
+    """
     source = load_source()
     body = between(source, "function onDecisionInput(event)", "function applyRangeDelta(action, key, delta)")
 
     assert "const continuous =" in body
     assert "renderLeftDecisionStatus();" in body
-    assert "withLeftRailScrollPreserved(() => renderAll());" in body
+    # Both wrappers should be in play on the non-continuous path.
+    assert "withLeftRailScrollPreserved" in body
+    assert "withFocusPreserved" in body
+    assert "renderAll()" in body
+
+
+def test_benchmark_input_preserves_focus() -> None:
+    """Typing in the benchmark suite must not yank the user out of
+    the field. renderBenchmarks() rebuilds the body via innerHTML;
+    without focus preservation users had to re-click after every
+    keystroke."""
+    source = load_source()
+    body = between(source, "function onBenchmarkInput(event)", "function onToggleView()")
+    assert "withFocusPreserved" in body, (
+        "benchmark input handler must wrap re-render in withFocusPreserved"
+    )
+
+
+def test_with_focus_preserved_helper_exists() -> None:
+    """The focus-preservation helper itself must be present and
+    invoke document.querySelector after the work() call so the new
+    DOM node can be located and re-focused."""
+    source = load_source()
+    body = between(source, "function withFocusPreserved(work)", "function setHelpButtonState")
+    assert "document.activeElement" in body
+    assert "selectionStart" in body
+    assert "querySelector(" in body
+    assert ".focus(" in body
 
 
 def test_help_popover_uses_global_overlay_layer_markup() -> None:

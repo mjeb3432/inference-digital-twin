@@ -892,6 +892,18 @@ input[type="number"], select,
   line-height: 1.6;
 }
 
+/* Phase 8 "FACILITY ONLINE" state -- replaces the muted
+ * "under construction" tag with a live mint glow so the user
+ * sees at a glance that the build has flipped from construction
+ * mode into live inference telemetry. */
+.viz-card-online {
+  border-color: rgba(51, 251, 211, 0.55);
+  background: rgba(51, 251, 211, 0.08);
+  color: #33fbd3;
+  box-shadow: 0 0 18px rgba(51, 251, 211, 0.22) inset;
+  text-shadow: 0 0 6px rgba(51, 251, 211, 0.45);
+}
+
 /* ─── Inline controls ────────────────────────────────────────────────── */
 .inline-controls {
   display: grid;
