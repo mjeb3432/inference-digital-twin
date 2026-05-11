@@ -17,9 +17,22 @@ pip install -e .
 python run.py
 ```
 
-The browser opens automatically. If it doesn't, go to **[http://127.0.0.1:8000/forge](http://127.0.0.1:8000/forge)**.
+The browser opens automatically. If it doesn't, the launcher prints the URL prominently — copy it into any browser.
 
 > **Web-only.** The Forge runs in your browser against the local FastAPI server — there is no native desktop build.
+
+### Platform notes
+
+`python run.py` is designed to work without any tweaks on Windows, macOS, Linux, and WSL. A few notes if you hit edge cases:
+
+| Platform | What `run.py` does for you |
+|---|---|
+| **Windows (cmd.exe)** | Banner is ASCII-only so cp1252 consoles don't crash. UTF-8 stdout is enabled automatically when supported. |
+| **macOS Monterey+** | Apple binds port 8000 to AirPlay Receiver by default. If 8000 is busy the launcher auto-rolls forward to the next free port (8001, 8002, …) and prints the new URL. To free 8000 permanently: System Settings → General → AirDrop & Handoff → turn off AirPlay Receiver. |
+| **Linux (headless / WSL)** | If `webbrowser.open()` fails, the launcher prints a big copy-pasteable URL banner instead of leaving you stranded. |
+| **Custom setups** | Three env-var overrides: `FORGE_HOST` (default `127.0.0.1`), `FORGE_PORT` (default `8000`), `FORGE_NO_BROWSER=1` to skip the auto-open. |
+
+If something does go wrong, the launcher exits with a clear human message — never a cryptic traceback.
 
 ---
 
