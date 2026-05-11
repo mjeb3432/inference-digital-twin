@@ -4,7 +4,7 @@
  * Renders the data center as a fully volumetric WebGL scene anchored
  * on a real architectural plan: data hall, mechanical room, electrical
  * room, MMR, switchgear, plus outdoor power yard (substation,
- * generators, batteries, solar PV arrays, wind PPA marker, SMR pad,
+ * generators, batteries, solar PV arrays, wind power marker, SMR pad,
  * fuel farm), rooftop chillers, and the surrounding site grass +
  * perimeter setback. Each major zone has a clean HTML overlay label
  * so the user can tell COMPUTE vs ENERGY vs COOLING vs NETWORK at
@@ -4027,15 +4027,22 @@
 
     /* ---------- FIBER ENTRY + IXP UPLINK ---------- */
     /* Phase 3+ visualises the network entry path the user committed
-     * to. Two physical signals:
-     *   • Underground glowing fiber strand from the parcel edge to
-     *     the MMR room (sky-blue, runs just below grade so it reads
-     *     as "buried duct").
-     *   • A long uplink line that extends BEYOND the parcel toward
-     *     where the IXP region lives (off-screen). Reads as the
-     *     wide-area carrier handoff.
-     *   • A fiber junction box at the parcel edge — a small mint
-     *     pillar with hover label "EXTERNAL CONNECTIVITY".
+     * to. The real-world physical reality is:
+     *
+     *   - Carriers drop fiber at the parcel edge in a handhole vault
+     *   - From there the fiber runs through a BURIED conduit bundle
+     *     (typically 3-4 HDPE pipes in a trench 24-36" deep)
+     *   - The conduits surface inside the building at the MMR (Meet-
+     *     Me Room) where the carriers' optical hardware lives
+     *
+     * We render this as:
+     *   - A dark trench/duct bundle running at y=-0.6 (below grade)
+     *   - A bright glowing mint strand INSIDE the duct (the actual
+     *     fiber) to show the connection is live
+     *   - Surface handhole covers (small flat plates) at intervals
+     *     along the route -- the visible markers above-grade that
+     *     real DCs have
+     *   - The same junction box at the parcel edge as before
      */
     if (showFiber && plan.rooms.mmr && plan.site) {
       const mmr = plan.rooms.mmr;
@@ -4045,18 +4052,93 @@
        * fence line where carriers actually drop fiber. */
       const [jx, , jz] = svgToWorld(site.x + site.w * 0.92, site.y + site.h * 0.5);
 
-      /* Underground fiber duct (slightly below grade) */
+      /* Buried HDPE conduit bundle. Rendered as a chamfered dark
+       * tube at y=-0.6 so the user can SEE that the fiber is
+       * underground -- the ground plate above covers most of it
+       * but at the trench edges the conduit reads through. We use
+       * a curved 3-point path so the trench looks engineered, not
+       * straight-line. */
+      const trenchMidX = (jx + mx) / 2;
+      const trenchMidZ = (jz + mz) / 2;
+      const conduitY = -0.6;
+      const conduitMat = new THREE.MeshStandardMaterial({
+        color: 0x1a2530, roughness: 0.7, metalness: 0.35,
+      });
+      /* Four parallel HDPE pipes -- this is what real DC fiber
+       * trenches look like. Cylinder geometry rotated along the
+       * route. */
+      function addConduitSegment(x0, z0, x1, z1) {
+        const dx = x1 - x0, dz = z1 - z0;
+        const len = Math.sqrt(dx * dx + dz * dz);
+        if (len < 0.01) return;
+        const ang = Math.atan2(dz, dx);
+        for (let i = 0; i < 4; i++) {
+          const offset = (i - 1.5) * 0.18; // 4 pipes spaced ~18cm apart
+          const pipe = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.06, 0.06, len, 8),
+            conduitMat,
+          );
+          pipe.rotation.z = Math.PI / 2;
+          pipe.rotation.y = -ang;
+          /* Position pipe between endpoints, with the perpendicular
+           * offset spreading the bundle. */
+          const midX = (x0 + x1) / 2 - Math.sin(ang) * offset;
+          const midZ = (z0 + z1) / 2 + Math.cos(ang) * offset;
+          pipe.position.set(midX, conduitY, midZ);
+          worldGroup.add(pipe);
+        }
+      }
+      addConduitSegment(jx, jz, trenchMidX, trenchMidZ);
+      addConduitSegment(trenchMidX, trenchMidZ, mx, mz);
+
+      /* Glowing mint fiber strand INSIDE the conduit -- the active
+       * optical channel. Drawn at the same depth as the conduit so
+       * it reads as carried INSIDE the duct, not floating in the
+       * dirt above. */
       const fiberMat = new THREE.MeshBasicMaterial({
-        color: 0x6dd6ff, transparent: true, opacity: 0.92,
+        color: 0x6dd6ff, transparent: true, opacity: 0.95,
       });
       const fiberPoints = [
-        new THREE.Vector3(jx, 0.05, jz),
-        new THREE.Vector3((jx + mx) / 2, 0.05, (jz + mz) / 2),
-        new THREE.Vector3(mx, 0.05, mz),
+        new THREE.Vector3(jx, conduitY, jz),
+        new THREE.Vector3(trenchMidX, conduitY, trenchMidZ),
+        new THREE.Vector3(mx, conduitY, mz),
       ];
       const fiberGeo = new THREE.BufferGeometry().setFromPoints(fiberPoints);
       const fiberLine = new THREE.Line(fiberGeo, fiberMat);
       worldGroup.add(fiberLine);
+
+      /* Surface handhole covers -- small dark plates at intervals
+       * along the route. These ARE the visible above-grade markers
+       * in real DCs (manhole-style access vaults for splicing). */
+      const handholeMat = new THREE.MeshStandardMaterial({
+        color: 0x2a323b, roughness: 0.75, metalness: 0.45,
+      });
+      const handholeFrames = [0.25, 0.55, 0.85]; // along the route
+      handholeFrames.forEach((t) => {
+        const hx = jx + (mx - jx) * t;
+        const hz = jz + (mz - jz) * t;
+        const cover = new THREE.Mesh(
+          new THREE.BoxGeometry(0.6, 0.08, 0.6),
+          handholeMat,
+        );
+        cover.position.set(hx, -0.35, hz);
+        cover.receiveShadow = true;
+        worldGroup.add(cover);
+        /* Etched cross-pattern on the cover (just a thin line) */
+        const etchMat = new THREE.MeshBasicMaterial({ color: 0x1a1f24 });
+        const etch1 = new THREE.Mesh(
+          new THREE.BoxGeometry(0.5, 0.005, 0.025),
+          etchMat,
+        );
+        etch1.position.set(hx, -0.31, hz);
+        worldGroup.add(etch1);
+        const etch2 = new THREE.Mesh(
+          new THREE.BoxGeometry(0.025, 0.005, 0.5),
+          etchMat,
+        );
+        etch2.position.set(hx, -0.31, hz);
+        worldGroup.add(etch2);
+      });
 
       /* Carrier junction box */
       const jbMat = new THREE.MeshStandardMaterial({
@@ -4584,8 +4666,36 @@
      *   - Slight roughness variation to read as dust
      */
     if (powerMix.solar > 0) {
-      const px = yardX - sw(160);
-      const pz = yardZ0 + sw(60);
+      /* Location-aware solar placement. Real DCs place panels where
+       * they can — that's wildly different per site type:
+       *
+       *   rural      Greenfield has open acres. Panels sit right next
+       *              to the substation (close-by, ~160 SVG units west).
+       *   campus     Modest setback — panels at the campus edge.
+       *   urban      Dense urban site has zero panel real-estate.
+       *              Real-world solution is an offsite "virtual"
+       *              array that maybe a separate landowner runs.
+       *              We render the array FAR off-parcel to the
+       *              west-southwest, with the substation linked by
+       *              a thin uplink line, exactly like the wind farm.
+       *   repurpose  Brownfield retrofit -- panels go on remnant
+       *              hardstanding, slightly further out than rural.
+       */
+      let px, pz;
+      if (locationType === "urban") {
+        px = yardX - sw(380);
+        pz = yardZ0 + sw(180);
+      } else if (locationType === "campus") {
+        px = yardX - sw(220);
+        pz = yardZ0 + sw(80);
+      } else if (locationType === "repurpose") {
+        px = yardX - sw(200);
+        pz = yardZ0 + sw(70);
+      } else {
+        // rural -- the canonical "right next to the site" placement.
+        px = yardX - sw(160);
+        pz = yardZ0 + sw(60);
+      }
 
       const cellMat = new THREE.MeshStandardMaterial({
         color: 0x0e2748,
@@ -4684,9 +4794,28 @@
       labelTargets.push({
         x: px, y: 2.0, z: pz,
         title: "SOLAR PV",
-        sub: `${Math.round(powerMix.solar)}% renewable`,
+        sub: `${Math.round(powerMix.solar)}% renewable${locationType === "urban" ? " · offsite array" : ""}`,
         kind: "energy",
       });
+
+      /* For urban sites we drew the array WAY off-parcel; add a thin
+       * uplink line from the substation so the user sees it's
+       * powering THIS facility (not a random offsite array). Same
+       * pattern as the wind turbine far-uplink. */
+      if (locationType === "urban" && plan.rooms.switchgear) {
+        const [tx2, , tz2] = svgToWorld(
+          plan.rooms.switchgear.x + plan.rooms.switchgear.w / 2,
+          plan.rooms.switchgear.y + plan.rooms.switchgear.h / 2
+        );
+        const solarUplinkMat = new THREE.LineBasicMaterial({
+          color: 0x6dd6ff, transparent: true, opacity: 0.35,
+        });
+        const solarUplinkGeo = new THREE.BufferGeometry().setFromPoints([
+          new THREE.Vector3(tx2, 0.4, tz2),
+          new THREE.Vector3(px, 0.8, pz),
+        ]);
+        worldGroup.add(new THREE.Line(solarUplinkGeo, solarUplinkMat));
+      }
     }
 
     /* Wind turbine marker — placement is location-aware. Urban
@@ -4742,7 +4871,7 @@
         turbineRotor.add(blade);
       }
       worldGroup.add(turbineRotor);
-      /* PPA uplink line from the substation to the turbine, suggesting
+      /* Grid uplink line from the substation to the turbine, suggesting
        * a utility-grid tie-in even though the turbine sits far away. */
       if (plan.rooms.switchgear) {
         const [tx, , tz] = svgToWorld(
@@ -4760,7 +4889,7 @@
       }
       labelTargets.push({
         x: wx, y: turbineH + 1.5, z: wz,
-        title: "WIND PPA",
+        title: "WIND POWER",
         sub: `${Math.round(powerMix.wind)}% wind contract`,
         kind: "energy",
         radius: 4,

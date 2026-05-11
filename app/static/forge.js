@@ -63,11 +63,30 @@
     pre: { label: "PRE-PERMITTED SITE", months: [1, 3], landMult: 1.3, costAdd: 750000 },
   };
 
+  /* POWER_SRC — published reference values, NOT site-specific quotes.
+   *
+   * capexKw is $ per kW of nameplate capacity for the build-out
+   * including all balance-of-plant + interconnection.
+   * rateMwh is the levelized cost of energy in $/MWh once running.
+   *
+   * Sources (each value is in the public range for 2024):
+   *   fom    Grid: U.S. EIA + utility tariff data. Commercial
+   *          delivered electricity averages ~$120-140/MWh.
+   *   gas    Natural-gas gensets: Lazard LCOE 2024 reciprocating
+   *          gas peakers ~$800-1200/kW capex, $80-130/MWh delivered.
+   *   solar  Utility-scale solar + 4-hr BESS hybrid: Lazard LCOE
+   *          2024 ~$1100-1700/kW capex, $45-75/MWh blended.
+   *   wind   Onshore wind: LBNL 2024 Wind Energy Technologies Market
+   *          Report ~$1200-1900/kW capex, $24-60/MWh LCOE.
+   *   smr    Small modular reactors (NuScale/X-energy estimates):
+   *          ~$5000-7000/kW capex, $80-100/MWh LCOE. Still pre-2027
+   *          commercial — flagged future:true.
+   */
   const POWER_SRC = {
     fom: { label: "FRONT-OF-METER GRID", lead: "6-24 MO / 2-5 YR", capexKw: 250, rateMwh: 127.5, class: "FIRM UTILITY", delivery: "24/7 FIRM", onsite: false, renewable: false },
     gas: { label: "NATURAL GAS GENSETS", lead: "2-5 YEARS", capexKw: 900, rateMwh: 98, class: "ONSITE DISPATCHABLE", delivery: "24/7 FIRM", onsite: true, renewable: false },
     solar: { label: "SOLAR + BESS", lead: "1-3 YEARS", capexKw: 1617, rateMwh: 61, class: "VARIABLE OVERLAY", delivery: "VARIABLE / SHAPED", onsite: true, renewable: true },
-    wind: { label: "WIND PPA", lead: "3-5 YEARS", capexKw: 1738, rateMwh: 66, class: "VARIABLE OVERLAY", delivery: "VARIABLE / PPA", onsite: false, renewable: true },
+    wind: { label: "WIND POWER", lead: "3-5 YEARS", capexKw: 1738, rateMwh: 66, class: "VARIABLE OVERLAY", delivery: "OFFSITE / VARIABLE", onsite: false, renewable: true },
     smr: { label: "SMALL MODULAR REACTOR", lead: "POST-2027", capexKw: 5000, rateMwh: 91, class: "FUTURE BASELOAD", delivery: "24/7 FIRM", onsite: true, renewable: false, future: true },
   };
 
@@ -78,6 +97,23 @@
     t4: { label: "TIER IV", uptime: 99.995, downtime: 0.4, mult: 1.5 },
   };
 
+  /* UPS / ride-through energy storage. Values are per MW of IT load.
+   *
+   * response    end-to-end transfer time once utility fails. VRLA &
+   *              li-ion need ~ms to switch via static-transfer-switch.
+   *              Supercaps respond in microseconds (DC-bus regulation).
+   * cycles      design discharge-cycle life. VRLA: 500-1500 (Eaton 9395
+   *              spec). Li-ion: 3000-5000 (Vertiv Liebert EXM2). Super-
+   *              caps: 100k-1M+ (Maxwell BMOD0500).
+   * kwh         design ride-through energy per MW of load. Sized to
+   *              ~15 min for VRLA, ~25 min for li-ion. Supercaps are
+   *              shorter native runtime but paired with a smaller BESS
+   *              for the longer tail -- hence the larger nominal kWh.
+   * kwCapex     $ per kW of IT load, all-in (cells + cabinet +
+   *              switchgear + commissioning). Public market data:
+   *              VRLA ~$100-150/kW, Li-ion ~$180-260/kW, Supercap +
+   *              BESS hybrid ~$350-450/kW.
+   */
   const UPS = {
     vrla: { label: "LEGACY VRLA UPS", response: "4-8 MS", cycles: 500, kwh: 240, kwCapex: 140, supercap: false },
     liion: { label: "LI-ION UPS", response: "2-4 MS", cycles: 4500, kwh: 420, kwCapex: 220, supercap: false },
@@ -129,12 +165,27 @@
     hvdc: { label: "800V HVDC", loss: 2, copper: 45, perMw: 420000, supercap: true },
   };
 
+  /* GPU specs.
+   *   kw         board TDP in kW. NVIDIA datasheet values.
+   *   vram       HBM capacity in GB.
+   *   hbmTbs     HBM bandwidth in TB/s (1 TB = 1e12 bytes). This
+   *              drives decode TPOT -- per-token autoregressive
+   *              generation reads ALL active params from HBM each
+   *              step, so decode is memory-bandwidth-bound, not
+   *              FLOPS-bound. (Williams roofline; the "memory wall".)
+   *   pf         peak BF16/FP8 FLOPS in PFLOPS. Drives prefill
+   *              (compute-bound) and the MFU ratio.
+   *   cost       list price USD (street price varies).
+   *
+   * Sources: NVIDIA Hopper/Blackwell whitepapers + AnandTech /
+   * Trail of Bits 2024 published specs.
+   */
   const GPU = {
-    h100: { label: "H100 SXM5", kw: 0.7, vram: 80, pf: 3.35, cost: 25000, series: "H", cooling: ["air", "rear", "d2c", "immersion"] },
-    h200: { label: "H200 SXM5", kw: 0.7, vram: 141, pf: 3.95, cost: 30000, series: "H", cooling: ["rear", "d2c", "immersion"] },
-    b200: { label: "B200 SXM5", kw: 1.35, vram: 192, pf: 9, cost: 40000, series: "B", cooling: ["d2c", "immersion"] },
-    b300: { label: "B300 HGX", kw: 1.35, vram: 288, pf: 10, cost: 50000, series: "B", cooling: ["d2c", "immersion"] },
-    rubin: { label: "RUBIN ULTRA (2027)", kw: 3.6, vram: 384, pf: 20, cost: 95000, series: "R", cooling: ["d2c", "immersion"], needsHvdc: true, needsSupercap: true, rackKw: 900 },
+    h100: { label: "H100 SXM5",        kw: 0.70, vram: 80,  hbmTbs: 3.35, pf: 3.35, cost: 25000, series: "H", cooling: ["air", "rear", "d2c", "immersion"] },
+    h200: { label: "H200 SXM5",        kw: 0.70, vram: 141, hbmTbs: 4.80, pf: 3.95, cost: 30000, series: "H", cooling: ["rear", "d2c", "immersion"] },
+    b200: { label: "B200 SXM5",        kw: 1.35, vram: 192, hbmTbs: 8.00, pf: 9.00, cost: 40000, series: "B", cooling: ["d2c", "immersion"] },
+    b300: { label: "B300 HGX",         kw: 1.35, vram: 288, hbmTbs: 8.00, pf: 10.0, cost: 50000, series: "B", cooling: ["d2c", "immersion"] },
+    rubin: { label: "RUBIN ULTRA (2027)", kw: 3.6, vram: 384, hbmTbs: 13.0, pf: 20.0, cost: 95000, series: "R", cooling: ["d2c", "immersion"], needsHvdc: true, needsSupercap: true, rackKw: 900 },
   };
 
   const STACK = {
@@ -736,6 +787,52 @@
     if (node) node.scrollTop = prev;
   }
 
+  /* Preserve INPUT focus across an HTML-rebuilding render. Several
+   * code paths set `innerHTML = ...` on containers that hold the
+   * focused input -- e.g. renderBenchmarks() rebuilds the whole
+   * benchmark body. That replaces the input element, killing focus
+   * AND the typing caret. Users had to re-click after every
+   * keystroke.
+   *
+   * This helper snapshots the active element's identity (by data-
+   * action + data-key), runs the work, then locates the equivalent
+   * NEW element in the freshly-rendered DOM and reapplies focus +
+   * caret/selection.
+   *
+   * Works for all the `data-action="..."` inputs the Forge uses;
+   * no-op if focus is on a non-input (button, etc.) or on an input
+   * that doesn't have data-action. */
+  function withFocusPreserved(work) {
+    const active = document.activeElement;
+    const isInput =
+      active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA");
+    const action = isInput ? active.dataset.action : null;
+    if (!action) {
+      // Nothing to preserve -- just run the work.
+      work();
+      return;
+    }
+    const key = active.dataset.key || null;
+    const selStart = typeof active.selectionStart === "number" ? active.selectionStart : null;
+    const selEnd = typeof active.selectionEnd === "number" ? active.selectionEnd : null;
+    work();
+    // Find the equivalent input in the freshly-rendered DOM.
+    const selector = key
+      ? `[data-action="${action}"][data-key="${key}"]`
+      : `[data-action="${action}"]`;
+    const next = document.querySelector(selector);
+    if (!next) return;
+    try {
+      next.focus({ preventScroll: true });
+      if (selStart !== null && selEnd !== null && typeof next.setSelectionRange === "function") {
+        next.setSelectionRange(selStart, selEnd);
+      }
+    } catch (_) {
+      // Some input types (number, in some browsers) don't allow
+      // setSelectionRange. Focus alone is still useful.
+    }
+  }
+
   function setHelpButtonState(activeButton) {
     el.leftDecisionBody.querySelectorAll(".inline-help-btn[data-help-key]").forEach((button) => {
       const open = !!activeButton && button === activeButton;
@@ -1029,16 +1126,16 @@
 
     recalcAll();
     if (lightweightRender) {
-      withLeftRailScrollPreserved(() => {
+      withLeftRailScrollPreserved(() => withFocusPreserved(() => {
         renderTimeline();
         renderLeftDecision();
         renderLeftMetrics();
         renderCenterCanvas();
         renderInspector();
-      });
+      }));
       return;
     }
-    withLeftRailScrollPreserved(() => renderAll());
+    withLeftRailScrollPreserved(() => withFocusPreserved(() => renderAll()));
   }
 
   function onDecisionInput(event) {
@@ -1149,7 +1246,7 @@
       return;
     }
 
-    withLeftRailScrollPreserved(() => renderAll());
+    withLeftRailScrollPreserved(() => withFocusPreserved(() => renderAll()));
   }
 
   function applyRangeDelta(action, key, delta) {
@@ -1250,8 +1347,14 @@
     }
 
     recalcBenchmarks();
-    renderBenchmarks();
-    renderInspector();
+    /* renderBenchmarks() rebuilds the entire benchmark body via
+     * innerHTML, which destroys the currently-focused input and
+     * yanks the caret. Wrap so focus + selection survive every
+     * keystroke. */
+    withFocusPreserved(() => {
+      renderBenchmarks();
+      renderInspector();
+    });
   }
 
   function onToggleView() {
@@ -1733,9 +1836,12 @@
   }
 
   function phaseCanvasHeading(phase) {
-    return phase >= 1 && phase <= 7
-      ? `PHASE ${phase} — ${PHASES[phase - 1]}`
-      : "LIVE CONSTRUCTION VIEW";
+    /* Phase 8 is the "construction complete" state -- show that
+     * explicitly so the user sees the facility has gone from
+     * under-construction to live. */
+    if (phase === 8) return "FACILITY ONLINE";
+    if (phase >= 1 && phase <= 7) return `PHASE ${phase} — ${PHASES[phase - 1]}`;
+    return "LIVE CONSTRUCTION VIEW";
   }
 
   function phaseStatusLabel(phase) {
@@ -1894,7 +2000,7 @@
       warnings.push("SMR IS MODELED AS A LARGE-CAMPUS FUTURE OPTION. SUB-250 MW RESULTS ARE SPECULATIVE.");
     }
     if ((facilityState.power.sources.wind || 0) > 0) {
-      warnings.push("WIND IS MODELED AS AN OFFSITE PPA / ENERGY OFFSET, NOT AN ONSITE FIRM FEED.");
+      warnings.push("WIND IS MODELED AS AN OFFSITE / VARIABLE ENERGY OFFSET, NOT AN ONSITE FIRM FEED.");
     }
 
     if (targetMw > siteMaxMw && !facilityState.site.utilityExpansionApproved) {
@@ -2367,28 +2473,68 @@
     const model = MODEL[ui.bench.model];
     const bytes = PRECISION_BYTES[ui.bench.precision] || 1;
 
+    /*
+     * Inference benchmark formulas. The original model conflated
+     * a few things that turn out to be load-bearing for accuracy:
+     *
+     *   PREFILL is compute-bound (Williams roofline): a forward
+     *   pass on `prompt` tokens does ~2 * prompt * params FLOPs,
+     *   so prefill time = (2 * prompt * params) / (flops * MFU).
+     *
+     *   DECODE is bandwidth-bound — autoregressive generation
+     *   reads all active params from HBM EVERY step, so each
+     *   token takes ~ params_bytes / hbm_bandwidth. This was the
+     *   user's specific complaint: the old formula divided by
+     *   FLOPS, which gives an unrealistically fast decode.
+     *
+     *   KV-CACHE per token is sensitive to precision. Storing the
+     *   KV in FP8 vs BF16 halves the cache size and doubles
+     *   max concurrent users for the same VRAM budget.
+     */
     const activeSlice = Math.min(Math.max(1, ui.derived.totalGpus), 256);
     const flops = gpu.pf * 1e15 * activeSlice;
+    const hbmBytesPerSec = (gpu.hbmTbs || 3.35) * 1e12 * activeSlice;
     const mfu = clamp(ui.derived.estimatedMfu, 0.16, 0.9);
 
     const queueMs = clamp(Math.max(0, ui.bench.conc - 24) * 0.85 * (workload ? workload.queueMult : 1), 0, 3000);
     const rttMs = clamp((ui.derived.extTtft || 8) + (facilityState.fiber.latencyMs || 0), 2, 600);
-    const batchScale = Math.max(1, Math.log2(ui.bench.batch + 1));
+    /* Continuous batching only helps prefill TTFT slightly because the
+     * first request still has to wait for compute. Use sqrt so batch
+     * size ~10x reduces TTFT ~3x, not 10x as a linear factor would
+     * suggest. */
+    const batchScale = Math.max(1, Math.sqrt(ui.bench.batch));
     const prefillMs = ((ui.bench.prompt * model.p * 2) / (flops * mfu * batchScale)) * 1000 * stack.seedTtft;
-    const firstTokenDecodeMs = clamp((model.p / 1e9) * (7.8 / (gpu.pf || 1)) * (1 / Math.max(0.35, stack.seedTps)) * (workload ? workload.decodeMult : 1), 8, 1800);
+    /* Bandwidth-bound first-token decode. params_bytes / hbm_bandwidth.
+     * params_bytes scales linearly with the chosen precision. */
+    const paramsBytes = model.p * bytes;
+    const firstTokenDecodeMs = clamp(
+      (paramsBytes / hbmBytesPerSec) * 1000 * (1 / Math.max(0.35, stack.seedTps)) * (workload ? workload.decodeMult : 1),
+      4, 1800
+    );
 
     const ttft = clamp(rttMs + queueMs + prefillMs + firstTokenDecodeMs, 20, 12000);
 
-    const peak = clamp((flops * mfu) / (model.p * 2 * bytes), 0.1, 50_000_000);
+    /* Peak per-GPU decode throughput: HBM bandwidth divided by params
+     * bytes gives tokens/s if memory is the bottleneck. Cap by FLOPS
+     * roofline for shorter / smaller models where compute could matter. */
+    const peakDecodeTps = hbmBytesPerSec / Math.max(1, paramsBytes);
+    const peakComputeTps = (flops * mfu) / Math.max(1, (model.p * 2 * bytes));
+    const peak = clamp(Math.min(peakDecodeTps, peakComputeTps), 0.1, 50_000_000);
     const outputPenalty = clamp(1 - ui.bench.output / 22000, 0.3, 1);
     const concPenalty = clamp(1 - Math.max(0, ui.bench.conc - 48) / 1600, 0.2, 1);
     const kvPenalty = clamp(Math.max(0, ui.bench.conc - 0.72 * (ui.bench.batch + 1)) / 2200, 0, 0.72);
     const bottleneckTps = peak * stack.seedTps * outputPenalty * concPenalty * (1 - kvPenalty) * (workload ? workload.tpsMult : 1);
     const tps = clamp(Math.min(peak, bottleneckTps), 0.01, peak);
 
+    /* VRAM budgeting. KV-cache is precision-aware: stored in `bytes`
+     * per element, so FP8 halves KV vs BF16 and roughly doubles user
+     * concurrency for the same VRAM. The 0.045 GB/token factor below
+     * is an empirical fit for ~70B-class models (2*layers*hidden*2
+     * bytes); the precision multiplier here is the new fix. */
     const totalVram = ui.derived.totalGpus * gpu.vram * 0.78;
     const modelMem = ui.bench.precision === "FP16" ? model.fp16 : ui.bench.precision === "FP8" ? model.fp8 : model.int4;
-    const kvPerReq = clamp((ui.bench.prompt / 512) * (model.p / 1e9) * 0.045, 0.5, 420);
+    const kvPrecisionScale = bytes / 2; // BF16=1.0, FP8=0.5, INT4=0.25
+    const kvPerReq = clamp((ui.bench.prompt / 512) * (model.p / 1e9) * 0.045 * kvPrecisionScale, 0.25, 420);
     const max = Math.max(1, Math.floor(Math.max(0, totalVram - modelMem) / kvPerReq));
 
     if (!ui.bench.assumedObservedTps || ui.bench.assumedObservedTps <= 0) {
@@ -3831,7 +3977,7 @@
         ["FACILITY CAPEX", compactMoney(facilityState.economics.capexBreakdown.coreFacility || 0)],
         ["IT CAPEX", compactMoney(facilityState.economics.capexBreakdown.itInfrastructure || 0)],
       ],
-      viz: `<div class="viz-card">${facilityState.phase < 8 ? "UNDER CONSTRUCTION MODE ACTIVE" : ui.mode === VIEW_MODE.MAP ? "VISUAL CONTEXT: GLOBAL TOKEN ROUTING MAP ACTIVE" : "VISUAL CONTEXT: FACILITY FLOOR TELEMETRY ACTIVE"}</div>`,
+      viz: `<div class="viz-card ${facilityState.phase === 8 ? "viz-card-online" : ""}">${facilityState.phase < 8 ? "UNDER CONSTRUCTION MODE ACTIVE" : "● FACILITY ONLINE — LIVE INFERENCE TELEMETRY"}</div>`,
     };
   }
 
