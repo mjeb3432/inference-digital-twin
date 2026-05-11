@@ -2077,11 +2077,17 @@
       dockDoor.castShadow = true;
       worldGroup.add(dockDoor);
 
-      /* Concrete loading dock pad in front of the door */
+      /* Concrete loading dock pad in front of the door. envMap
+       * intensity capped low because the dock pad sits in full
+       * sunlight under the IBL and was picking up a hot specular
+       * gleam at certain orbit angles -- spotted in QA against the
+       * rural / urban combos. Matte concrete in real life reflects
+       * almost nothing. */
       const dockPadGeo = new THREE.BoxGeometry(dockW + 1.4, 0.6, 2.4);
       const dockPadMat = new THREE.MeshStandardMaterial({
-        color: 0x6e747d, roughness: 0.95,
+        color: 0x6e747d, roughness: 1.0, metalness: 0,
         roughnessMap: proceduralNoiseTexture({ size: 64, scale: 5, seed: 141 }),
+        envMapIntensity: 0.15,
       });
       const dockPad = new THREE.Mesh(dockPadGeo, dockPadMat);
       dockPad.position.set(dockOff, 0.3, -D / 2 - 1.4);
@@ -2473,7 +2479,10 @@
         new THREE.BoxGeometry(11, 0.12, 8),
         new THREE.MeshStandardMaterial({
           color: 0x4a5258, roughness: 1.0, metalness: 0,
-          envMapIntensity: 0.3,
+          /* Dropped 0.30 -> 0.15 after QA spotted a residual sun
+           * glare on the asphalt at certain orbit angles. Real
+           * asphalt is matte; this gets us closer to that. */
+          envMapIntensity: 0.15,
         }),
       );
       parkingPad.position.set(parkingX, 0.06, parkingZ);
@@ -5396,6 +5405,13 @@
     controls.minDistance = 12;
     controls.maxDistance = 280;
     controls.maxPolarAngle = Math.PI * 0.495; // never look up from below
+    /* Clamp the MINIMUM polar angle so the camera can't pitch
+     * straight down onto the roof. Polar = 0 means camera directly
+     * above the target; PI/2 means horizontal. We allow pitches no
+     * closer to overhead than 32 degrees, which keeps the horizon
+     * visible from every orbit position and preserves the
+     * multi-volume building silhouette. */
+    controls.minPolarAngle = Math.PI * 0.18;
     controls.update();
 
     /* ---------- Resize handling ---------- */
