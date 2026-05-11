@@ -3427,15 +3427,10 @@
       worldGroup.add(signText);
     }
 
-    /* ---------- Floor grid inside building ---------- */
-    const grid = new THREE.GridHelper(
-      Math.max(sw(bldg.w), sw(bldg.h)) * 1.2,
-      Math.max(8, Math.round(Math.max(sw(bldg.w), sw(bldg.h)) / 4)),
-      0x1a3a36,
-      0x10221f
-    );
-    grid.position.y = 0.011;
-    worldGroup.add(grid);
+    /* The site-floor GridHelper was removed -- the user reported the
+     * horizontal grid lines across the floor were too "Tron-grid" and
+     * fought the realism of the textured concrete slab. The PolyHaven
+     * concrete texture is now the only thing the floor reads as. */
 
     /* Each room is a coloured floor pad + an optional taller "rack" of
      * generic equipment so the user perceives volume. The colours
@@ -3936,6 +3931,102 @@
           sub: monLabel,
           kind: "network",
           radius: 4,
+        });
+      }
+
+      /* COOLING DIFFERENTIATION inside the data hall.
+       *
+       * Each cooling type gets a unique visual signature so the user
+       * can tell at a glance which thermal architecture they picked:
+       *
+       *   air         CRAH air handlers parked along the wall +
+       *               blue-tinted perforated floor tiles in the cold
+       *               aisles (the canonical raised-floor look).
+       *   rear        Rear-door heat exchangers -- a thin mint slab
+       *               on the back of every rack row.
+       *   d2c         Sky-blue overhead manifold pipes running along
+       *               each row (existing CDU code below).
+       *   immersion   Bath tanks (handled in the rack code with
+       *               isImmersion -- glass-lid horizontal cabinets).
+       */
+      if (showRacks && coolingType === "air" && racks.rowLabels) {
+        /* Perforated cold-aisle tiles -- blue translucent rectangles
+         * in the aisles between rows. */
+        const tileMat = new THREE.MeshStandardMaterial({
+          color: 0x4a85b0, transparent: true, opacity: 0.42,
+          roughness: 0.55, metalness: 0.45,
+          emissive: 0x18324a, emissiveIntensity: 0.25,
+        });
+        racks.rowLabels.forEach((row, i) => {
+          if (i % 2 !== 0) return; // every other row is a cold aisle
+          const [rx, , rz] = svgToWorld(dh.x + dh.w / 2, row.cy);
+          const tile = new THREE.Mesh(
+            new THREE.BoxGeometry(sw(dh.w) * 0.86, 0.02, 1.1),
+            tileMat,
+          );
+          tile.position.set(rx, 0.105, rz - 0.6);
+          worldGroup.add(tile);
+        });
+        /* Three CRAH air-handler boxes along the SOUTH wall of the
+         * data hall. */
+        const crahMat = new THREE.MeshStandardMaterial({
+          color: 0xb8c0c8, roughness: 0.4, metalness: 0.65,
+        });
+        const crahGrilleMat = new THREE.MeshStandardMaterial({
+          color: 0x2a2f33, roughness: 0.85, metalness: 0.25,
+        });
+        for (let c = 0; c < 3; c++) {
+          const tx = sw(dh.x + dh.w * (0.2 + c * 0.3)) - sw(cx);
+          const tz = sw(dh.y + dh.h) - sw(cz) - 0.6;
+          const crah = new THREE.Mesh(
+            roundedBox(1.4, 2.4, 0.7, 0.04),
+            crahMat,
+          );
+          crah.position.set(tx, 1.2, tz);
+          crah.castShadow = true;
+          worldGroup.add(crah);
+          /* Grille face */
+          const grille = new THREE.Mesh(
+            new THREE.BoxGeometry(1.2, 1.8, 0.02),
+            crahGrilleMat,
+          );
+          grille.position.set(tx, 1.25, tz - 0.36);
+          worldGroup.add(grille);
+        }
+        const [dx2, , dz2] = svgToWorld(dh.x + dh.w / 2, dh.y + dh.h / 2);
+        labelTargets.push({
+          x: dx2, y: RACK_HEIGHT + 1.6, z: dz2,
+          title: "AIR-COOLED",
+          sub: "CRAH handlers + perforated tiles",
+          kind: "cooling",
+          radius: 5,
+        });
+      }
+
+      if (showRacks && coolingType === "rear" && racks.rowLabels) {
+        /* Rear-door heat exchanger doors -- a slim mint slab mounted
+         * on the back of each rack row (where the hot air exits). */
+        const rdhxMat = new THREE.MeshStandardMaterial({
+          color: 0x6dd6ff, roughness: 0.4, metalness: 0.65,
+          emissive: 0x0a3548, emissiveIntensity: 0.4,
+        });
+        racks.rowLabels.forEach((row) => {
+          const [rx, , rz] = svgToWorld(dh.x + dh.w / 2, row.cy);
+          const door = new THREE.Mesh(
+            new THREE.BoxGeometry(sw(dh.w) * 0.86, RACK_HEIGHT * 0.95, 0.08),
+            rdhxMat,
+          );
+          door.position.set(rx, RACK_HEIGHT * 0.5, rz + 0.55);
+          door.castShadow = true;
+          worldGroup.add(door);
+        });
+        const [dx2, , dz2] = svgToWorld(dh.x + dh.w / 2, dh.y + dh.h / 2);
+        labelTargets.push({
+          x: dx2, y: RACK_HEIGHT + 1.0, z: dz2,
+          title: "REAR-DOOR HEAT EXCHANGE",
+          sub: "Liquid-coupled rear doors per row",
+          kind: "cooling",
+          radius: 5,
         });
       }
 
