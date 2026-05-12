@@ -1472,6 +1472,141 @@
           bush.position.set(bx, 0, bz);
           worldGroup.add(bush);
         }
+
+        /* Neighbouring farm — two grain silos + a red barn on the
+         * eastern edge of the parcel. Classic rural-Americana
+         * silhouette that instantly anchors "this is in the country"
+         * for the user. */
+        const farmAnchorX = sx + sw(plan.site.w) * 0.46;
+        const farmAnchorZ = sz - sw(plan.site.h) * 0.30;
+        const silaMat = new THREE.MeshStandardMaterial({
+          color: 0xc8ccd0, roughness: 0.55, metalness: 0.45,
+          envMapIntensity: 0.55,
+        });
+        const silaCapMat = new THREE.MeshStandardMaterial({
+          color: 0x6a7280, roughness: 0.65, metalness: 0.55,
+          envMapIntensity: 0.5,
+        });
+        const silaBandMat = new THREE.MeshStandardMaterial({
+          color: 0x8a8e95, roughness: 0.7, metalness: 0.4,
+        });
+        for (let s = 0; s < 2; s++) {
+          const silaX = farmAnchorX + s * 2.4;
+          const silaZ = farmAnchorZ;
+          /* Cylindrical silo body */
+          const body = new THREE.Mesh(
+            new THREE.CylinderGeometry(1.2, 1.2, 6.0, 16),
+            silaMat,
+          );
+          body.position.set(silaX, 3.0, silaZ);
+          body.castShadow = true;
+          body.receiveShadow = true;
+          worldGroup.add(body);
+          /* Conical metal cap */
+          const cap = new THREE.Mesh(
+            new THREE.ConeGeometry(1.25, 1.0, 16),
+            silaCapMat,
+          );
+          cap.position.set(silaX, 6.5, silaZ);
+          cap.castShadow = true;
+          worldGroup.add(cap);
+          /* Three horizontal bands for the segmented look */
+          for (let b = 0; b < 3; b++) {
+            const band = new THREE.Mesh(
+              new THREE.TorusGeometry(1.21, 0.06, 6, 24),
+              silaBandMat,
+            );
+            band.rotation.x = Math.PI / 2;
+            band.position.set(silaX, 1.0 + b * 2.0, silaZ);
+            worldGroup.add(band);
+          }
+        }
+
+        /* Red barn — classic gambrel-roof silhouette, simplified to
+         * a wide box body + triangular prism roof. */
+        const barnX = farmAnchorX - 3.5;
+        const barnZ = farmAnchorZ + 1.5;
+        const barnBodyMat = new THREE.MeshStandardMaterial({
+          color: 0x8a2a1a, roughness: 0.85, metalness: 0.05,
+          envMapIntensity: 0.3,
+        });
+        const barnRoofMat = new THREE.MeshStandardMaterial({
+          color: 0x4a2010, roughness: 0.9, metalness: 0.05,
+          envMapIntensity: 0.25,
+        });
+        const barnTrimMat = new THREE.MeshStandardMaterial({
+          color: 0xe6e8ec, roughness: 0.8, metalness: 0.05,
+        });
+        const barnBody = new THREE.Mesh(
+          roundedBox(5.0, 3.0, 4.0, 0.08),
+          barnBodyMat,
+        );
+        barnBody.position.set(barnX, 1.5, barnZ);
+        barnBody.castShadow = true;
+        barnBody.receiveShadow = true;
+        worldGroup.add(barnBody);
+        /* Pitched roof — triangular prism */
+        const roofShape = new THREE.Shape();
+        roofShape.moveTo(-2.6, 0);
+        roofShape.lineTo(2.6, 0);
+        roofShape.lineTo(0, 1.8);
+        roofShape.lineTo(-2.6, 0);
+        const barnRoofGeo = new THREE.ExtrudeGeometry(roofShape, {
+          depth: 4.0, bevelEnabled: false,
+        });
+        barnRoofGeo.translate(0, 0, -2.0);
+        const barnRoof = new THREE.Mesh(barnRoofGeo, barnRoofMat);
+        barnRoof.position.set(barnX, 3.0, barnZ);
+        barnRoof.castShadow = true;
+        worldGroup.add(barnRoof);
+        /* White trim on long edges — sells the classic American barn
+         * silhouette */
+        for (const trimZ of [-2.05, 2.05]) {
+          const trim = new THREE.Mesh(
+            new THREE.BoxGeometry(5.2, 0.12, 0.08),
+            barnTrimMat,
+          );
+          trim.position.set(barnX, 3.0, barnZ + trimZ);
+          worldGroup.add(trim);
+        }
+        /* Big sliding barn door */
+        const barnDoorMat = new THREE.MeshStandardMaterial({
+          color: 0x3a1810, roughness: 0.9, metalness: 0.05,
+        });
+        const barnDoor = new THREE.Mesh(
+          new THREE.BoxGeometry(1.8, 2.2, 0.06),
+          barnDoorMat,
+        );
+        barnDoor.position.set(barnX, 1.1, barnZ + 2.03);
+        worldGroup.add(barnDoor);
+
+        /* Split-rail wood fence along the property line — three rails
+         * + posts every 2.5m */
+        const fenceMat = new THREE.MeshStandardMaterial({
+          color: 0x5a4434, roughness: 0.95, metalness: 0.05,
+        });
+        const fenceLen = sw(plan.site.h) * 0.55;
+        const fenceStartZ = sz - sw(plan.site.h) * 0.15;
+        const fenceX = sx + sw(plan.site.w) * 0.50;
+        const fencePosts = Math.floor(fenceLen / 2.5);
+        for (let p = 0; p <= fencePosts; p++) {
+          const fz = fenceStartZ + (p / fencePosts) * fenceLen - fenceLen / 2;
+          const post = new THREE.Mesh(
+            new THREE.BoxGeometry(0.12, 1.1, 0.12),
+            fenceMat,
+          );
+          post.position.set(fenceX, 0.55, fz);
+          post.castShadow = true;
+          worldGroup.add(post);
+        }
+        for (let r = 0; r < 3; r++) {
+          const rail = new THREE.Mesh(
+            new THREE.BoxGeometry(0.06, 0.08, fenceLen),
+            fenceMat,
+          );
+          rail.position.set(fenceX, 0.3 + r * 0.32, fenceStartZ);
+          worldGroup.add(rail);
+        }
       } else if (locationType === "urban") {
         /* Detailed neighbouring city blocks — each is a real
          * mid-rise commercial building rather than a flat box.
@@ -1838,11 +1973,17 @@
           deck.position.set(0, p.h, 0);
           deck.receiveShadow = true;
           wh.add(deck);
+          /* Tooth height — bumped from 0.85 → 1.8 world units after
+           * QA round 6 found the sawtooth silhouette was visually
+           * indistinguishable from a flat-top warehouse at the
+           * default camera zoom. 1.8 reads as classic sawtooth from
+           * the orbit framing without dominating the building mass. */
+          const toothH = 1.8;
           for (let s = 0; s < teeth; s++) {
             const toothShape = new THREE.Shape();
             toothShape.moveTo(0, 0);
             toothShape.lineTo(toothW, 0);
-            toothShape.lineTo(0, 0.85);
+            toothShape.lineTo(0, toothH);
             toothShape.lineTo(0, 0);
             const toothGeo = new THREE.ExtrudeGeometry(toothShape, {
               depth: p.w - 0.4,
@@ -1866,13 +2007,13 @@
             /* Glass face on the angled (north-facing) hypotenuse.
              * Width = warehouse length, height = hypotenuse length.
              * Co-positioned with the tooth at the slot centre. */
-            const hypotenuse = Math.sqrt(toothW * toothW + 0.85 * 0.85);
+            const hypotenuse = Math.sqrt(toothW * toothW + toothH * toothH);
             const glassGeo = new THREE.PlaneGeometry(p.w - 0.4, hypotenuse);
             const glass = new THREE.Mesh(glassGeo, glassMat);
-            const slope = Math.atan2(0.85, toothW);
+            const slope = Math.atan2(toothH, toothW);
             glass.position.set(
               0,
-              p.h + 0.425,
+              p.h + toothH / 2,
               -p.d / 2 + (s + 0.5) * toothW,
             );
             /* YXZ order: Y first (align plane long axis to world X),
@@ -2119,16 +2260,92 @@
             ofc.add(post);
           }
 
-          /* Roof HVAC */
-          for (let h = 0; h < 2; h++) {
+          /* Roof HVAC — bumped to 3 units + larger so the rooftop
+           * silhouette reads from default orbit zoom. */
+          const officeHvacMat = new THREE.MeshStandardMaterial({
+            color: 0x3d464f, roughness: 0.6, metalness: 0.5,
+            envMapIntensity: 0.55,
+          });
+          const officeHvacGrilleMat = new THREE.MeshStandardMaterial({
+            color: 0x1c2126, roughness: 0.85, metalness: 0.35,
+          });
+          for (let h = 0; h < 3; h++) {
             const hvac = new THREE.Mesh(
-              roundedBox(0.9, 0.45, 0.7, 0.04),
-              new THREE.MeshStandardMaterial({
-                color: 0x3d464f, roughness: 0.6, metalness: 0.5,
-              }),
+              roundedBox(1.3, 0.7, 1.0, 0.06),
+              officeHvacMat,
             );
-            hvac.position.set(-p.w * 0.2 + h * (p.w * 0.4), p.h + 0.5, 0);
+            hvac.position.set(-p.w * 0.3 + h * (p.w * 0.3), p.h + 0.6, 0);
+            hvac.castShadow = true;
             ofc.add(hvac);
+            const grille = new THREE.Mesh(
+              new THREE.BoxGeometry(1.0, 0.04, 0.8),
+              officeHvacGrilleMat,
+            );
+            grille.position.set(-p.w * 0.3 + h * (p.w * 0.3), p.h + 0.96, 0);
+            ofc.add(grille);
+          }
+
+          /* Roof parapet — thin solid band around the perimeter so the
+           * roof reads as a real flat-roof office cap, not a chopped
+           * box. */
+          const officeParapetMat = new THREE.MeshStandardMaterial({
+            color: 0x363c45, roughness: 0.7, metalness: 0.4,
+            envMapIntensity: 0.4,
+          });
+          [[0, -p.d / 2], [0, p.d / 2]].forEach(([px, pz]) => {
+            const pp = new THREE.Mesh(
+              new THREE.BoxGeometry(p.w + 0.08, 0.35, 0.12),
+              officeParapetMat,
+            );
+            pp.position.set(px, p.h + 0.18, pz);
+            pp.castShadow = true;
+            ofc.add(pp);
+          });
+          [[-p.w / 2, 0], [p.w / 2, 0]].forEach(([px, pz]) => {
+            const pp = new THREE.Mesh(
+              new THREE.BoxGeometry(0.12, 0.35, p.d + 0.08),
+              officeParapetMat,
+            );
+            pp.position.set(px, p.h + 0.18, pz);
+            pp.castShadow = true;
+            ofc.add(pp);
+          });
+
+          /* Ground-floor entrance accent — a bright mint LED strip
+           * across the kicker beneath the canopy. Reads as a designed
+           * corporate lobby front. */
+          const entranceGlowMat = new THREE.MeshBasicMaterial({
+            color: 0x33fbd3, transparent: true, opacity: 0.85,
+          });
+          const entranceGlow = new THREE.Mesh(
+            new THREE.BoxGeometry(p.w * 0.3, 0.05, 0.04),
+            entranceGlowMat,
+          );
+          entranceGlow.position.set(0, kickerH - 0.1, p.d / 2 + 0.02);
+          ofc.add(entranceGlow);
+
+          /* Planter boxes flanking the entrance — short rectangular
+           * volumes with a darker top to read as soil. */
+          const planterMat = new THREE.MeshStandardMaterial({
+            color: 0x4a4138, roughness: 0.85, metalness: 0.0,
+          });
+          const soilMat = new THREE.MeshStandardMaterial({
+            color: 0x2a2218, roughness: 1.0, metalness: 0.0,
+          });
+          for (const planterX of [-p.w * 0.22, p.w * 0.22]) {
+            const planter = new THREE.Mesh(
+              new THREE.BoxGeometry(0.9, 0.35, 0.6),
+              planterMat,
+            );
+            planter.position.set(planterX, 0.18, p.d / 2 + 0.5);
+            planter.castShadow = true;
+            ofc.add(planter);
+            const soil = new THREE.Mesh(
+              new THREE.BoxGeometry(0.82, 0.05, 0.52),
+              soilMat,
+            );
+            soil.position.set(planterX, 0.38, p.d / 2 + 0.5);
+            ofc.add(soil);
           }
 
           worldGroup.add(ofc);
@@ -4663,11 +4880,17 @@
       /* Above-grade utility marking — a wide bright stripe along the
        * route at y=-0.33 (sits just above the site plate's top at
        * -0.34). Reads as the orange/yellow paint utilities apply to
-       * indicate buried cabling. Uses a Plane so it lays flat. */
+       * indicate buried cabling.
+       *
+       * QA round 6: bumped from 0.22 wide → 0.6 wide and ramped
+       * emissive 0.85 → 1.6. At default orbit zoom the original
+       * stripe was invisible. The new geometry reads as a clear
+       * "buried fiber here" indicator from any angle. */
       const surfaceY = -0.33;
       const markingMat = new THREE.MeshStandardMaterial({
-        color: 0xffb84d, emissive: 0xff9a2e, emissiveIntensity: 0.85,
+        color: 0xffc34d, emissive: 0xffa530, emissiveIntensity: 1.6,
         roughness: 0.45, metalness: 0.0,
+        side: THREE.DoubleSide,
       });
       function addSurfaceMarking(x0, z0, x1, z1) {
         const dx = x1 - x0, dz = z1 - z0;
@@ -4675,7 +4898,7 @@
         if (len < 0.01) return;
         const ang = Math.atan2(dz, dx);
         const stripe = new THREE.Mesh(
-          new THREE.PlaneGeometry(len, 0.22),
+          new THREE.PlaneGeometry(len, 0.6),
           markingMat,
         );
         stripe.rotation.x = -Math.PI / 2;
@@ -4689,7 +4912,7 @@
           const tx = x0 + (dx) * (t / ticks);
           const tz = z0 + (dz) * (t / ticks);
           const tick = new THREE.Mesh(
-            new THREE.PlaneGeometry(0.45, 0.06),
+            new THREE.PlaneGeometry(1.1, 0.15),
             markingMat,
           );
           tick.rotation.x = -Math.PI / 2;
