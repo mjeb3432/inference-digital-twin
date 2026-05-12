@@ -369,6 +369,44 @@ def test_demo_url_param_seeds_polished_state() -> None:
     assert "completed: [1, 2, 3, 4, 5, 6, 7]" in preset_body
 
     # The URL is stripped after seeding so back/forward doesn't re-seed
-    applier_body = between(source, "function applyDemoStateFromURL()", "function enforceLocks")
+    applier_body = between(source, "function applyDemoStateFromURL()", "function seedDefaultDemoIfEmpty")
     assert "history.replaceState" in applier_body
     assert 'params.delete("demo")' in applier_body
+
+
+def test_default_demo_seeds_polished_scene_on_empty_localstorage() -> None:
+    """When localStorage is completely empty (first visit, post-reset,
+    cleared browser data), seedDefaultDemoIfEmpty() runs in init()
+    and writes the polished repurpose-online demo state so the
+    landing experience matches the reference image. Returning users
+    keep their build (the seeder bails when localStorage is set)."""
+    source = load_source()
+
+    assert "function seedDefaultDemoIfEmpty()" in source
+    assert "seedDefaultDemoIfEmpty();" in source
+
+    body = between(source, "function seedDefaultDemoIfEmpty()", "function enforceLocks")
+    # The seeder must bail when state already exists (don't clobber
+    # the user's build)
+    assert "if (existing) return" in body
+    # It uses the repurpose-online preset
+    assert 'DEMO_PRESETS["repurpose-online"]' in body
+    # And writes to the same key the rest of the persist path uses
+    assert "FULL_STATE_KEY" in body
+
+
+def test_phase_8_building_has_mint_rim_glow() -> None:
+    """The reference image shows a prominent mint cyan rim along the
+    top of the DC building when Phase 8 is online. This rim is what
+    sells the 'facility online' state visually."""
+    source = load_3d_source()
+    body = between(source, "/* Phase 8 mint cap-rim", "/* Mechanical penthouse")
+    # Gated on Phase 8
+    assert "if (fullyOnline)" in body
+    # Four rim segments wrap the building perimeter
+    assert "rimGlowMat" in body
+    assert "rimN" in body
+    assert "rimS" in body
+    # Corner point lights cast mint into the immediate scene
+    assert "cornerLight" in body
+    assert "0x33fbd3" in body

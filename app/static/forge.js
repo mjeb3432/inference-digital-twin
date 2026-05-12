@@ -704,14 +704,21 @@
      * can hit /forge?demo=repurpose-online and immediately see the
      * floor view rendering at the reference quality (repurpose
      * industrial site at Phase 8 "facility online") without
-     * clicking through 8 phases of decisions.
-     *
-     * Why this exists: the beforeunload handler writes in-memory
-     * state back to localStorage on every navigation, which made it
-     * impossible to inject a polished state from outside the app.
-     * This URL param is the supported way to load a "marketing-quality"
-     * scene snapshot. */
+     * clicking through 8 phases of decisions. */
     applyDemoStateFromURL();
+
+    /* AUTO-DEMO ON FIRST VISIT — if the user has NO persisted state
+     * (fresh browser, freshly-cleared cache, or post-reset), seed
+     * the polished "repurpose phase 8" demo scene so the very first
+     * thing they see is the marketing-quality floor view rather than
+     * an empty Phase 1 staked-out building footprint.
+     *
+     * Why this is safe: it only fires when localStorage is empty.
+     * Returning users keep their build. "Reset Build" clears state
+     * → next /forge load reseeds the demo. The user can then click
+     * "Reset Build" again or edit any decision to make the scene
+     * their own — the auto-demo is just the LANDING experience. */
+    seedDefaultDemoIfEmpty();
 
     /* Resume the user's last build if there is one. The restore is
        lossy-safe: corrupted JSON or schema mismatches fall back to
@@ -2646,6 +2653,36 @@
       const newUrl = window.location.pathname + (search ? "?" + search : "") + window.location.hash;
       window.history.replaceState({}, "", newUrl);
     } catch (_) { /* not critical */ }
+  }
+
+  /* Seed the polished repurpose-phase-8 demo scene when localStorage
+   * is completely empty. Triggers on first-ever visit, after a
+   * "Reset Build", or after the user clears their browser data.
+   *
+   * Bypassed when:
+   *   - localStorage already has a state (returning user)
+   *   - The ?demo= URL param already seeded (idempotent — would have
+   *     just written; this would no-op since key is now set)
+   *
+   * This makes the LANDING experience of /forge match the marketing-
+   * quality reference image regardless of how the user got there.
+   * After landing, every UI edit (Reset Build, change location,
+   * advance phase) flows through the normal persist path and the
+   * demo seeder won't fire again. */
+  function seedDefaultDemoIfEmpty() {
+    let existing;
+    try { existing = window.localStorage.getItem(FULL_STATE_KEY); }
+    catch (_) { return; }
+    if (existing) return; // user has a build; respect it
+    const preset = DEMO_PRESETS["repurpose-online"];
+    if (!preset) return;
+    try {
+      const payload = preset.build();
+      window.localStorage.setItem(FULL_STATE_KEY, JSON.stringify(payload));
+      window.localStorage.setItem("forge:intro:seen:v1", "true");
+    } catch (err) {
+      console.warn("[forge] default demo seeding failed:", err);
+    }
   }
 
   function enforceLocks() {
