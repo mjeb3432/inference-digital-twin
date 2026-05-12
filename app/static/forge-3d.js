@@ -3863,6 +3863,48 @@
       pw.castShadow = true;
       worldGroup.add(pw);
 
+      /* Phase 8 mint cap-rim — a bright cyan emissive band ALONG THE
+       * TOP of the parapet that reads as "facility online" power
+       * indicator from any orbit angle. The reference image shows
+       * this as the dominant visual signal that the DC is alive. */
+      if (fullyOnline) {
+        const rimGlowMat = new THREE.MeshBasicMaterial({
+          color: 0x33fbd3,
+          transparent: true,
+          opacity: 0.92,
+        });
+        const rimY = BUILDING_HEIGHT + parapetH + 0.3 + 0.01;
+        const rimT = 0.12; // rim thickness
+        const rimH = 0.22; // rim height (vertical band)
+        const rimW2 = W * 1.012;
+        const rimD2 = D * 1.012;
+        // North rim
+        const rimN = new THREE.Mesh(new THREE.BoxGeometry(rimW2, rimH, rimT), rimGlowMat);
+        rimN.position.set(0, rimY - rimH / 2 - 0.01, D / 2 + 0.2);
+        worldGroup.add(rimN);
+        // South rim
+        const rimS = new THREE.Mesh(new THREE.BoxGeometry(rimW2, rimH, rimT), rimGlowMat);
+        rimS.position.set(0, rimY - rimH / 2 - 0.01, -D / 2 - 0.2);
+        worldGroup.add(rimS);
+        // East rim
+        const rimE = new THREE.Mesh(new THREE.BoxGeometry(rimT, rimH, rimD2), rimGlowMat);
+        rimE.position.set(W / 2 + 0.2, rimY - rimH / 2 - 0.01, 0);
+        worldGroup.add(rimE);
+        // West rim
+        const rimW = new THREE.Mesh(new THREE.BoxGeometry(rimT, rimH, rimD2), rimGlowMat);
+        rimW.position.set(-W / 2 - 0.2, rimY - rimH / 2 - 0.01, 0);
+        worldGroup.add(rimW);
+
+        /* Subtle PointLight on each rim corner so the glow casts a
+         * sliver of mint into the immediate scene — sells the
+         * "this is lit" feeling. */
+        for (const [cx, cz] of [[-W / 2, -D / 2], [W / 2, -D / 2], [-W / 2, D / 2], [W / 2, D / 2]]) {
+          const cornerLight = new THREE.PointLight(0x33fbd3, 0.45, 14, 1.8);
+          cornerLight.position.set(cx, BUILDING_HEIGHT + 0.6, cz);
+          worldGroup.add(cornerLight);
+        }
+      }
+
       /* Mechanical penthouse — a smaller box on the roof toward the
        * mechanical-room side so the silhouette has vertical interest. */
       const penthouseMat = new THREE.MeshStandardMaterial({
