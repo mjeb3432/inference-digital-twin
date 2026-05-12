@@ -4,12 +4,17 @@ from pathlib import Path
 
 
 FORGE_JS = Path.cwd() / "app" / "static" / "forge.js"
+FORGE_3D_JS = Path.cwd() / "app" / "static" / "forge-3d.js"
 FORGE_CSS = Path.cwd() / "app" / "static" / "forge.css"
 WORLD_PATHS_JSON = Path.cwd() / "app" / "static" / "world_paths.json"
 
 
 def load_source() -> str:
     return FORGE_JS.read_text(encoding="utf-8-sig")
+
+
+def load_3d_source() -> str:
+    return FORGE_3D_JS.read_text(encoding="utf-8-sig")
 
 
 def load_css() -> str:
@@ -239,3 +244,101 @@ def test_phase_four_decision_numbers_are_sequential() -> None:
     assert "DECISION 1 — DEVELOPER TYPE" in body
     assert "DECISION 2 — COOLING INFRASTRUCTURE" in body
     assert "DECISION 3 — POWER ARCHITECTURE" in body
+
+
+def test_sawtooth_tooth_geometry_is_centered_on_both_axes() -> None:
+    """QA round 5: the sawtooth teeth were shifted back by one slot
+    in Z because the geometry post-rotation occupied world Z
+    [-toothW, 0] relative to local origin (asymmetric). Fix translates
+    on BOTH axes before rotateY so the geometry is symmetric around
+    local origin, then places each tooth at the slot CENTRE rather
+    than the slot start."""
+    source = load_3d_source()
+    body = between(
+        source,
+        "/* Sawtooth roof — series of triangular monitors.",
+        "/* Parapet strip running around the perimeter",
+    )
+
+    # Geometry must translate on BOTH axes before rotation
+    assert "toothGeo.translate(-toothW / 2, 0, -halfExtrude)" in body
+    # Tooth placed at slot CENTRE, not slot start
+    assert "(s + 0.5) * toothW" in body
+
+
+def test_repurpose_warehouse_has_polish_details() -> None:
+    """The repurposed industrial warehouse needs to read as a real
+    warehouse, not just a flat tilt-up box. Beyond the sawtooth fix
+    we add: a roof deck (so gaps between teeth don't look into the
+    void), parapet bands around the perimeter, tilt-up panel seams,
+    a raised loading dock with bay doors, rooftop HVAC condensers,
+    and a faded signage band on the long wall."""
+    source = load_3d_source()
+    body = between(
+        source,
+        "/* Tilt-up warehouse buildings with sawtooth roof monitors",
+        "/* A few hardy \"industrial volunteer\" trees",
+    )
+
+    assert "roofDeckMat" in body
+    assert "parapetMat" in body
+    assert "Tilt-up panel pilasters" in body or "panelMat" in body
+    assert "dockPlatform" in body
+    assert "dockDoorMat" in body
+    assert "hvacMat" in body
+    assert "signBand" in body
+
+
+def test_underground_fiber_has_above_grade_surface_markings() -> None:
+    """QA finding: the buried conduit at y=-0.6 was fully occluded by
+    the site plate (top at y=-0.34) so the user couldn't see the
+    fiber at all. Real DCs use utility-marking paint + raised
+    handhole covers + warning signs as visible above-grade signals.
+    All three must be present."""
+    source = load_3d_source()
+    body = between(
+        source,
+        "/* QA finding (this PR): the underground conduit at y=-0.6",
+        "/* Carrier junction box */",
+    )
+
+    # Surface-level utility marking stripe
+    assert "addSurfaceMarking(" in body
+    assert "markingMat" in body
+    # Raised handhole covers (not flush)
+    assert "Outer rim" in body or "handholeRimMat" in body
+    # Cut-away vault revealing buried conduit
+    assert "vaultMat" in body or "Cut-away vault" in body
+    # Warning sign on a post
+    assert "warnSignMat" in body
+    # Below-grade strand is preserved for orbit-from-below users
+    assert "fiberBuriedMat" in body
+
+
+def test_scene_wide_ibl_tuning_pass_exists() -> None:
+    """High-metalness, low-roughness materials default to
+    envMapIntensity=1.0 in Three.js, which is too glossy under a
+    real HDRI. A scene-wide traversal pass caps untuned materials
+    based on their metalness/roughness profile."""
+    source = load_3d_source()
+    assert "function tuneSceneIBL(" in source
+    assert "tuneSceneIBL(worldGroup)" in source
+    body = between(source, "function tuneSceneIBL(", "tuneSceneIBL(worldGroup)")
+    # Heuristic should respect already-tuned materials
+    assert "mat.envMapIntensity !== 1.0" in body
+    # And differentiate by metalness/roughness
+    assert "mat.metalness" in body
+    assert "mat.roughness" in body
+
+
+def test_gltf_loader_infrastructure_is_wired() -> None:
+    """Path D — glTF asset library. The loader infrastructure is
+    in place so adding a .glb to /app/static/models/ + an entry to
+    FORGE_ASSETS upgrades a procedural prop. The cache layer means
+    each asset is fetched once per session."""
+    source = load_3d_source()
+    assert "const FORGE_ASSETS = {" in source
+    assert "function ensureGLTFLoader()" in source
+    assert "function loadAsset(assetKey)" in source
+    assert "_assetCache" in source
+    assert "GLTFLoader.js" in source

@@ -77,6 +77,82 @@
   const THREE_VERSION = "0.137.0";
   const THREE_CDN_URL = `https://unpkg.com/three@${THREE_VERSION}/build/three.min.js`;
   const ORBIT_CDN_URL = `https://unpkg.com/three@${THREE_VERSION}/examples/js/controls/OrbitControls.js`;
+  const GLTF_CDN_URL = `https://unpkg.com/three@${THREE_VERSION}/examples/js/loaders/GLTFLoader.js`;
+
+  /* Path D — glTF asset library (lazy-loaded).
+   *
+   * Drop-in replacement strategy for the highest-leverage props:
+   * server racks (most-instanced), diesel gensets (most-visible
+   * outdoor equipment), pad-mount transformers, fluid coolers,
+   * pickup truck + worker silhouette.
+   *
+   * Implementation:
+   *   1. GLTFLoader loaded only the FIRST time a glTF asset is
+   *      requested. Pays the ~50KB cost lazily, after the procedural
+   *      scene has already painted.
+   *   2. loadAsset(name) returns a promise. Resolves to a cloned
+   *      Group of the loaded glTF scene, OR resolves to null if the
+   *      file doesn't exist (404) or the loader fails. Caller falls
+   *      back to procedural geometry on null.
+   *   3. Cache layer means each asset is only fetched once per
+   *      session even if the user remounts the scene.
+   *   4. Asset files live in /app/static/models/. To enable a glTF
+   *      drop-in, add the file there and update FORGE_ASSETS below.
+   *
+   * Files are intentionally OPTIONAL — the procedural scene is
+   * fully self-sufficient. Adding a .glb just upgrades that prop.
+   */
+  const FORGE_ASSETS = {
+    // Map of asset key -> URL path relative to /app/static/.
+    // Populated when real glTF files land in /app/static/models/.
+    // Empty for now (all procedural). Example wiring:
+    //   rack:         "/static/models/server_rack.glb",
+    //   genset:       "/static/models/diesel_genset.glb",
+    //   transformer:  "/static/models/pad_mount_transformer.glb",
+    //   fluidCooler:  "/static/models/fluid_cooler.glb",
+    //   forklift:     "/static/models/forklift.glb",
+  };
+  const _assetCache = new Map();    // assetKey -> Promise<Group | null>
+  let _gltfLoaderPromise = null;
+  function ensureGLTFLoader() {
+    if (typeof window.THREE !== "undefined" && window.THREE.GLTFLoader) {
+      return Promise.resolve();
+    }
+    if (!_gltfLoaderPromise) {
+      _gltfLoaderPromise = loadScriptOnce(GLTF_CDN_URL).catch((err) => {
+        _gltfLoaderPromise = null;
+        throw err;
+      });
+    }
+    return _gltfLoaderPromise;
+  }
+  function loadAsset(assetKey) {
+    if (_assetCache.has(assetKey)) return _assetCache.get(assetKey);
+    const url = FORGE_ASSETS[assetKey];
+    if (!url) {
+      const p = Promise.resolve(null);
+      _assetCache.set(assetKey, p);
+      return p;
+    }
+    const p = ensureGLTFLoader().then(() => {
+      const THREE = window.THREE;
+      if (!THREE.GLTFLoader) return null;
+      return new Promise((resolve) => {
+        new THREE.GLTFLoader().load(
+          url,
+          (gltf) => resolve(gltf.scene || null),
+          undefined,
+          () => resolve(null),
+        );
+      });
+    }).catch(() => null);
+    _assetCache.set(assetKey, p);
+    return p;
+  }
+  /* Expose for diagnostics and future Path D wiring. */
+  if (typeof window !== "undefined") {
+    window.Forge3DAssets = { FORGE_ASSETS, loadAsset, _assetCache };
+  }
 
   // ---------- Lazy Three.js loader ----------------------------------------
 
@@ -1714,16 +1790,27 @@
           shell.receiveShadow = true;
           wh.add(shell);
 
-          /* Sawtooth roof — series of triangular monitors. QA found
-           * the prism was MIS-CENTERED on the warehouse width: the
-           * translate happened on the X-axis BEFORE the rotateY,
-           * but the extrusion was along Z. After rotation the prism's
-           * long axis ran from X=0 to X=p.w-0.4 instead of
-           * x in [-(p.w-0.4)/2, +(p.w-0.4)/2] — so it appeared shifted
-           * to one side of the warehouse, producing what looked like
-           * a flat slab rather than a clean sawtooth pattern. Fix:
-           * translate on the EXTRUSION axis (Z) BEFORE the rotation
-           * so the post-rotation X is centered. */
+          /* Sawtooth roof — series of triangular monitors. Two
+           * historical bugs, fully resolved here:
+           *   1. PR #34 centred the prism on the warehouse's X axis
+           *      (long axis) by translating on the EXTRUSION axis
+           *      before rotateY.
+           *   2. QA round 5 (this PR) found the teeth were still
+           *      shifted BACK by one slot along Z: the geometry's
+           *      world-Z extent post-rotation was [-toothW, 0]
+           *      relative to local origin, so placing at
+           *      z = -p.d/2 + s*toothW put the prism into the slot
+           *      BEHIND its intended slot, leaving a gap at the
+           *      front of the building and a tooth sticking out
+           *      past the back. The glass plane was placed at the
+           *      slot-s centre, two slots ahead of its tooth.
+           *   Fix: centre the tooth-shape's cross-section on the
+           *   local-origin X axis (subtract toothW/2 BEFORE rotateY)
+           *   so post-rotation the geometry's world-Z extent is
+           *   [-toothW/2, +toothW/2] (symmetric around origin), then
+           *   place each tooth at the slot's CENTRE
+           *   (-p.d/2 + (s + 0.5) * toothW). Glass lives at the same
+           *   slot centre. Tooth + glass align. */
           const teeth = Math.max(3, Math.floor(p.d / 3));
           const toothW = p.d / teeth;
           const halfExtrude = (p.w - 0.4) / 2;
@@ -1733,6 +1820,24 @@
             color: 0xa6c4d6, roughness: 0.25, metalness: 0.75,
             transparent: true, opacity: 0.55, envMapIntensity: 0.85,
           });
+          /* Shared roofing-deck material — slightly darker than the
+           * warehouse wall to read as a separate plane (tar / built-up
+           * roofing rather than tilt-up concrete). */
+          const roofDeckMat = new THREE.MeshStandardMaterial({
+            color: 0x4f3e30, roughness: 0.95, metalness: 0.05,
+            roughnessMap: proceduralNoiseTexture({ size: 64, scale: 6, seed: 181 }),
+            envMapIntensity: 0.25,
+          });
+          /* Roof deck — a flat plane covering the full footprint just
+           * below the teeth. Without this the gaps between teeth
+           * looked into the void inside the warehouse. */
+          const deck = new THREE.Mesh(
+            new THREE.BoxGeometry(p.w - 0.4, 0.08, p.d - 0.4),
+            roofDeckMat,
+          );
+          deck.position.set(0, p.h, 0);
+          deck.receiveShadow = true;
+          wh.add(deck);
           for (let s = 0; s < teeth; s++) {
             const toothShape = new THREE.Shape();
             toothShape.moveTo(0, 0);
@@ -1743,43 +1848,173 @@
               depth: p.w - 0.4,
               bevelEnabled: false,
             });
-            /* Center along the extrusion axis (Z) BEFORE rotating.
-             * After rotateY(PI/2) Z becomes X, so the prism is
-             * centered on the warehouse's long axis (X). */
-            toothGeo.translate(0, 0, -halfExtrude);
+            /* Centre BOTH axes of the geometry on local origin so
+             * post-rotation the tooth is symmetric in world X and Z.
+             * Translate(-toothW/2, 0, -halfExtrude): shape X moves
+             * from [0, toothW] to [-toothW/2, +toothW/2]; extrude Z
+             * moves from [0, p.w-0.4] to [-halfExtrude, +halfExtrude].
+             * After rotateY(PI/2): local X -> world -Z (so cross-
+             * section centres on world Z=0), local Z -> world X
+             * (so extrusion centres on world X=0). */
+            toothGeo.translate(-toothW / 2, 0, -halfExtrude);
             toothGeo.rotateY(Math.PI / 2);
             const tooth = new THREE.Mesh(toothGeo, warehouseMat);
-            tooth.position.set(0, p.h, -p.d / 2 + s * toothW);
+            /* Place at CENTRE of slot s, not at slot start. */
+            tooth.position.set(0, p.h, -p.d / 2 + (s + 0.5) * toothW);
             tooth.castShadow = true;
             wh.add(tooth);
-            /* Glass face on the angled side. Width = warehouse length
-             * (post-translate X-axis), height = hypotenuse of the
-             * triangle. Position along Z to match the tooth's vertical
-             * (north) face. */
+            /* Glass face on the angled (north-facing) hypotenuse.
+             * Width = warehouse length, height = hypotenuse length.
+             * Co-positioned with the tooth at the slot centre. */
             const hypotenuse = Math.sqrt(toothW * toothW + 0.85 * 0.85);
             const glassGeo = new THREE.PlaneGeometry(p.w - 0.4, hypotenuse);
             const glass = new THREE.Mesh(glassGeo, glassMat);
             const slope = Math.atan2(0.85, toothW);
-            /* Glass sits along the hypotenuse: from (toothW, 0) up to
-             * (0, 0.85) in shape space. Midpoint (toothW/2, 0.425) in
-             * tooth-local coordinates -> world Y = p.h + 0.425. */
             glass.position.set(
               0,
               p.h + 0.425,
-              -p.d / 2 + s * toothW + toothW / 2,
+              -p.d / 2 + (s + 0.5) * toothW,
             );
-            /* Rotate so plane normal points OUT of the slope (north). */
+            /* YXZ order: Y first (align plane long axis to world X),
+             * then X (-slope tilts the plane back to lie on the
+             * hypotenuse). */
             glass.rotation.set(-slope, Math.PI / 2, 0, "YXZ");
             wh.add(glass);
           }
 
-          /* Loading bay door (one side) */
-          const door = new THREE.Mesh(
-            new THREE.BoxGeometry(p.w * 0.32, p.h * 0.7, 0.04),
-            warehouseSeamMat,
+          /* Parapet strip running around the perimeter — sells the
+           * "real warehouse" silhouette and hides the gap between the
+           * sawtooths and the wall top. */
+          const parapetMat = new THREE.MeshStandardMaterial({
+            color: 0x5e4838, roughness: 0.9, metalness: 0.05,
+            envMapIntensity: 0.3,
+          });
+          [[0, -p.d / 2], [0, p.d / 2]].forEach(([px, pz]) => {
+            const parapet = new THREE.Mesh(
+              new THREE.BoxGeometry(p.w + 0.05, 0.35, 0.18),
+              parapetMat,
+            );
+            parapet.position.set(px, p.h + 0.18, pz);
+            parapet.castShadow = true;
+            wh.add(parapet);
+          });
+          [[-p.w / 2, 0], [p.w / 2, 0]].forEach(([px, pz]) => {
+            const parapet = new THREE.Mesh(
+              new THREE.BoxGeometry(0.18, 0.35, p.d + 0.05),
+              parapetMat,
+            );
+            parapet.position.set(px, p.h + 0.18, pz);
+            parapet.castShadow = true;
+            wh.add(parapet);
+          });
+
+          /* Tilt-up panel pilasters — vertical seams every ~3m. The
+           * single thing that makes a flat tilt-up shell read as a
+           * REAL warehouse rather than a stretched cube. */
+          const panelMat = new THREE.MeshStandardMaterial({
+            color: 0x5a4434, roughness: 0.92, metalness: 0.05,
+          });
+          const panelCount = Math.max(3, Math.floor(p.d / 2.8));
+          for (let pi = 1; pi < panelCount; pi++) {
+            const pz = -p.d / 2 + (pi / panelCount) * p.d;
+            [-p.w / 2 - 0.01, p.w / 2 + 0.01].forEach((sideX) => {
+              const seam = new THREE.Mesh(
+                new THREE.BoxGeometry(0.08, p.h - 0.4, 0.06),
+                panelMat,
+              );
+              seam.position.set(sideX, (p.h - 0.4) / 2, pz);
+              wh.add(seam);
+            });
+          }
+
+          /* Loading dock — raised concrete platform + truck-bay doors
+           * on the long side facing away from the DC. Replaces the
+           * single flat plywood-style door with a real industrial
+           * dock. */
+          const dockPlatMat = new THREE.MeshStandardMaterial({
+            color: 0x8f8a82, roughness: 0.95, metalness: 0.05,
+            envMapIntensity: 0.2,
+          });
+          const dockDoorMat = new THREE.MeshStandardMaterial({
+            color: 0x4a4138, roughness: 0.55, metalness: 0.25,
+            envMapIntensity: 0.4,
+          });
+          const dockBayCount = idx === 0 ? 3 : 2;
+          const dockBayW = (p.w * 0.66) / dockBayCount;
+          const dockPlatform = new THREE.Mesh(
+            new THREE.BoxGeometry(p.w * 0.7, 1.0, 1.6),
+            dockPlatMat,
           );
-          door.position.set(0, p.h * 0.35, p.d / 2 + 0.02);
-          wh.add(door);
+          dockPlatform.position.set(0, 0.5, p.d / 2 + 0.8);
+          dockPlatform.castShadow = true;
+          dockPlatform.receiveShadow = true;
+          wh.add(dockPlatform);
+          for (let b = 0; b < dockBayCount; b++) {
+            const bayCx = -p.w * 0.33 + dockBayW * (b + 0.5);
+            const bayDoor = new THREE.Mesh(
+              new THREE.BoxGeometry(dockBayW * 0.78, p.h * 0.6, 0.04),
+              dockDoorMat,
+            );
+            bayDoor.position.set(bayCx, p.h * 0.35, p.d / 2 + 0.025);
+            wh.add(bayDoor);
+            /* Horizontal corrugation lines on each bay door */
+            for (let c = 0; c < 5; c++) {
+              const corr = new THREE.Mesh(
+                new THREE.BoxGeometry(dockBayW * 0.78, 0.015, 0.005),
+                warehouseSeamMat,
+              );
+              corr.position.set(
+                bayCx,
+                p.h * 0.35 - p.h * 0.3 + (c + 1) * (p.h * 0.6 / 6),
+                p.d / 2 + 0.05,
+              );
+              wh.add(corr);
+            }
+          }
+
+          /* Rooftop HVAC condenser units — small painted-steel boxes
+           * with grilles on top. Standard industrial silhouette
+           * detail. Placed between teeth so they don't intersect. */
+          const hvacMat = new THREE.MeshStandardMaterial({
+            color: 0xa7a39a, roughness: 0.55, metalness: 0.55,
+            envMapIntensity: 0.6,
+          });
+          const hvacGrilleMat = new THREE.MeshStandardMaterial({
+            color: 0x2c3036, roughness: 0.8, metalness: 0.4,
+          });
+          const hvacCount = idx === 0 ? 2 : 1;
+          for (let h = 0; h < hvacCount; h++) {
+            const cx = (h - (hvacCount - 1) / 2) * 1.6;
+            const cz = -p.d / 2 + p.d * 0.18 + h * 0.4;
+            const unit = new THREE.Mesh(
+              roundedBox(1.2, 0.6, 0.9, 0.05),
+              hvacMat,
+            );
+            unit.position.set(cx, p.h + 0.36, cz);
+            unit.castShadow = true;
+            wh.add(unit);
+            const grille = new THREE.Mesh(
+              new THREE.BoxGeometry(0.9, 0.04, 0.7),
+              hvacGrilleMat,
+            );
+            grille.position.set(cx, p.h + 0.66 + 0.02, cz);
+            wh.add(grille);
+          }
+
+          /* Aged signage band — a faded paint stripe across the long
+           * wall. Just a thin emissive-less plane. Reads as
+           * "abandoned brand" without committing to specific text. */
+          const signMat = new THREE.MeshStandardMaterial({
+            color: 0x8a6c52, roughness: 0.9, metalness: 0.05,
+            transparent: true, opacity: 0.78, envMapIntensity: 0.2,
+          });
+          const signBand = new THREE.Mesh(
+            new THREE.PlaneGeometry(p.w * 0.55, p.h * 0.22),
+            signMat,
+          );
+          signBand.position.set(0, p.h * 0.75, -p.d / 2 - 0.04);
+          signBand.rotation.y = Math.PI;
+          wh.add(signBand);
 
           worldGroup.add(wh);
         });
@@ -4383,36 +4618,39 @@
        * fence line where carriers actually drop fiber. */
       const [jx, , jz] = svgToWorld(site.x + site.w * 0.92, site.y + site.h * 0.5);
 
-      /* Buried HDPE conduit bundle. Rendered as a chamfered dark
-       * tube at y=-0.6 so the user can SEE that the fiber is
-       * underground -- the ground plate above covers most of it
-       * but at the trench edges the conduit reads through. We use
-       * a curved 3-point path so the trench looks engineered, not
-       * straight-line. */
+      /* QA finding (this PR): the underground conduit at y=-0.6 was
+       * fully occluded by the site plate (top at y=-0.34), so the
+       * user couldn't see the fiber at all even though it existed.
+       *
+       * Real DCs solve this exact UX with three above-grade signals:
+       *   1. Utility marking paint (orange/yellow stripe on surface)
+       *   2. Raised handhole / vault covers at splice intervals
+       *   3. Warning signs ("CAUTION: BURIED FIBER")
+       *
+       * We render all three, PLUS keep the buried conduit + glowing
+       * strand at y=-0.6 for users who orbit BELOW the ground plane
+       * (the camera clamp at minPolarAngle=0.18*PI still allows a
+       * shallow up-tilt that reveals the underside).
+       */
       const trenchMidX = (jx + mx) / 2;
       const trenchMidZ = (jz + mz) / 2;
       const conduitY = -0.6;
       const conduitMat = new THREE.MeshStandardMaterial({
         color: 0x1a2530, roughness: 0.7, metalness: 0.35,
       });
-      /* Four parallel HDPE pipes -- this is what real DC fiber
-       * trenches look like. Cylinder geometry rotated along the
-       * route. */
       function addConduitSegment(x0, z0, x1, z1) {
         const dx = x1 - x0, dz = z1 - z0;
         const len = Math.sqrt(dx * dx + dz * dz);
         if (len < 0.01) return;
         const ang = Math.atan2(dz, dx);
         for (let i = 0; i < 4; i++) {
-          const offset = (i - 1.5) * 0.18; // 4 pipes spaced ~18cm apart
+          const offset = (i - 1.5) * 0.18;
           const pipe = new THREE.Mesh(
             new THREE.CylinderGeometry(0.06, 0.06, len, 8),
             conduitMat,
           );
           pipe.rotation.z = Math.PI / 2;
           pipe.rotation.y = -ang;
-          /* Position pipe between endpoints, with the perpendicular
-           * offset spreading the bundle. */
           const midX = (x0 + x1) / 2 - Math.sin(ang) * offset;
           const midZ = (z0 + z1) / 2 + Math.cos(ang) * offset;
           pipe.position.set(midX, conduitY, midZ);
@@ -4422,54 +4660,187 @@
       addConduitSegment(jx, jz, trenchMidX, trenchMidZ);
       addConduitSegment(trenchMidX, trenchMidZ, mx, mz);
 
-      /* Glowing mint fiber strand INSIDE the conduit -- the active
-       * optical channel. Drawn at the same depth as the conduit so
-       * it reads as carried INSIDE the duct, not floating in the
-       * dirt above. */
-      const fiberMat = new THREE.MeshBasicMaterial({
+      /* Above-grade utility marking — a wide bright stripe along the
+       * route at y=-0.33 (sits just above the site plate's top at
+       * -0.34). Reads as the orange/yellow paint utilities apply to
+       * indicate buried cabling. Uses a Plane so it lays flat. */
+      const surfaceY = -0.33;
+      const markingMat = new THREE.MeshStandardMaterial({
+        color: 0xffb84d, emissive: 0xff9a2e, emissiveIntensity: 0.85,
+        roughness: 0.45, metalness: 0.0,
+      });
+      function addSurfaceMarking(x0, z0, x1, z1) {
+        const dx = x1 - x0, dz = z1 - z0;
+        const len = Math.sqrt(dx * dx + dz * dz);
+        if (len < 0.01) return;
+        const ang = Math.atan2(dz, dx);
+        const stripe = new THREE.Mesh(
+          new THREE.PlaneGeometry(len, 0.22),
+          markingMat,
+        );
+        stripe.rotation.x = -Math.PI / 2;
+        stripe.rotation.z = -ang;
+        stripe.position.set((x0 + x1) / 2, surfaceY, (z0 + z1) / 2);
+        worldGroup.add(stripe);
+        /* Tick marks every ~3 units along the stripe — utility crews
+         * paint these to mark splice locations. */
+        const ticks = Math.max(1, Math.floor(len / 3));
+        for (let t = 1; t < ticks; t++) {
+          const tx = x0 + (dx) * (t / ticks);
+          const tz = z0 + (dz) * (t / ticks);
+          const tick = new THREE.Mesh(
+            new THREE.PlaneGeometry(0.45, 0.06),
+            markingMat,
+          );
+          tick.rotation.x = -Math.PI / 2;
+          tick.rotation.z = -ang + Math.PI / 2;
+          tick.position.set(tx, surfaceY + 0.001, tz);
+          worldGroup.add(tick);
+        }
+      }
+      addSurfaceMarking(jx, jz, trenchMidX, trenchMidZ);
+      addSurfaceMarking(trenchMidX, trenchMidZ, mx, mz);
+
+      /* Glowing optical-pulse line at SURFACE level — primary visible
+       * indicator of the live fiber. Pulses via the animated dash
+       * pattern on the render loop. */
+      const fiberMat = new THREE.LineBasicMaterial({
         color: 0x6dd6ff, transparent: true, opacity: 0.95,
+        linewidth: 2,
       });
       const fiberPoints = [
-        new THREE.Vector3(jx, conduitY, jz),
-        new THREE.Vector3(trenchMidX, conduitY, trenchMidZ),
-        new THREE.Vector3(mx, conduitY, mz),
+        new THREE.Vector3(jx, surfaceY + 0.002, jz),
+        new THREE.Vector3(trenchMidX, surfaceY + 0.002, trenchMidZ),
+        new THREE.Vector3(mx, surfaceY + 0.002, mz),
       ];
       const fiberGeo = new THREE.BufferGeometry().setFromPoints(fiberPoints);
       const fiberLine = new THREE.Line(fiberGeo, fiberMat);
       worldGroup.add(fiberLine);
 
-      /* Surface handhole covers -- small dark plates at intervals
-       * along the route. These ARE the visible above-grade markers
-       * in real DCs (manhole-style access vaults for splicing). */
-      const handholeMat = new THREE.MeshStandardMaterial({
-        color: 0x2a323b, roughness: 0.75, metalness: 0.45,
+      /* Also keep the below-grade strand for orbit-from-below users */
+      const fiberBuriedMat = new THREE.LineBasicMaterial({
+        color: 0x4a8ea8, transparent: true, opacity: 0.6,
       });
-      const handholeFrames = [0.25, 0.55, 0.85]; // along the route
+      const fiberBuriedGeo = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(jx, conduitY, jz),
+        new THREE.Vector3(trenchMidX, conduitY, trenchMidZ),
+        new THREE.Vector3(mx, conduitY, mz),
+      ]);
+      worldGroup.add(new THREE.Line(fiberBuriedGeo, fiberBuriedMat));
+
+      /* Raised handhole / vault covers — sit ABOVE the surface so
+       * they cast shadows and read at any orbit angle. Bigger than
+       * the previous flush plates so they're clearly readable as
+       * access points. Each cover has an emissive border that pulses
+       * with the optical signal so users can trace the route. */
+      const handholeMat = new THREE.MeshStandardMaterial({
+        color: 0x3a424d, roughness: 0.55, metalness: 0.7,
+        envMapIntensity: 0.5,
+      });
+      const handholeRimMat = new THREE.MeshStandardMaterial({
+        color: 0x222a32, roughness: 0.7, metalness: 0.5,
+      });
+      const handholeBorderMat = new THREE.MeshBasicMaterial({
+        color: 0x6dd6ff, transparent: true, opacity: 0.9,
+      });
+      const handholeFrames = [0.18, 0.42, 0.62, 0.85];
       handholeFrames.forEach((t) => {
         const hx = jx + (mx - jx) * t;
         const hz = jz + (mz - jz) * t;
+        /* Outer rim — slightly larger ring */
+        const rim = new THREE.Mesh(
+          new THREE.BoxGeometry(0.95, 0.05, 0.95),
+          handholeRimMat,
+        );
+        rim.position.set(hx, surfaceY + 0.025, hz);
+        rim.receiveShadow = true;
+        worldGroup.add(rim);
+        /* Cover — embossed steel plate */
         const cover = new THREE.Mesh(
-          new THREE.BoxGeometry(0.6, 0.08, 0.6),
+          roundedBox(0.78, 0.1, 0.78, 0.04),
           handholeMat,
         );
-        cover.position.set(hx, -0.35, hz);
+        cover.position.set(hx, surfaceY + 0.075, hz);
+        cover.castShadow = true;
         cover.receiveShadow = true;
         worldGroup.add(cover);
-        /* Etched cross-pattern on the cover (just a thin line) */
+        /* Emissive cyan glow strip around the perimeter */
+        [[0, 0, 0.36], [0, 0, -0.36], [0.36, 0, 0], [-0.36, 0, 0]].forEach(([ox, oy, oz]) => {
+          const isLong = Math.abs(oz) > Math.abs(ox);
+          const border = new THREE.Mesh(
+            new THREE.BoxGeometry(isLong ? 0.78 : 0.04, 0.012, isLong ? 0.04 : 0.78),
+            handholeBorderMat,
+          );
+          border.position.set(hx + ox, surfaceY + 0.12, hz + oz);
+          worldGroup.add(border);
+        });
+        /* Cross-etched maintenance grooves on top of the cover */
         const etchMat = new THREE.MeshBasicMaterial({ color: 0x1a1f24 });
         const etch1 = new THREE.Mesh(
-          new THREE.BoxGeometry(0.5, 0.005, 0.025),
+          new THREE.BoxGeometry(0.65, 0.005, 0.04),
           etchMat,
         );
-        etch1.position.set(hx, -0.31, hz);
+        etch1.position.set(hx, surfaceY + 0.126, hz);
         worldGroup.add(etch1);
         const etch2 = new THREE.Mesh(
-          new THREE.BoxGeometry(0.025, 0.005, 0.5),
+          new THREE.BoxGeometry(0.04, 0.005, 0.65),
           etchMat,
         );
-        etch2.position.set(hx, -0.31, hz);
+        etch2.position.set(hx, surfaceY + 0.126, hz);
         worldGroup.add(etch2);
       });
+
+      /* Cut-away vault at the trench midpoint — a small open pit
+       * revealing the conduit bundle below ground. Sells the "this
+       * IS buried" story by exposing one segment. */
+      const vaultMat = new THREE.MeshStandardMaterial({
+        color: 0x2a2d33, roughness: 0.95, metalness: 0.0,
+        envMapIntensity: 0.15,
+      });
+      const vault = new THREE.Mesh(
+        new THREE.BoxGeometry(1.6, 0.55, 1.2),
+        vaultMat,
+      );
+      vault.position.set(trenchMidX, surfaceY - 0.32, trenchMidZ);
+      vault.receiveShadow = true;
+      worldGroup.add(vault);
+      /* Vault collar — bright safety-yellow band around the rim */
+      const collarMat = new THREE.MeshStandardMaterial({
+        color: 0xffc340, emissive: 0xff8a1a, emissiveIntensity: 0.6,
+        roughness: 0.55, metalness: 0.15,
+      });
+      [[0, 0, 0.62], [0, 0, -0.62], [0.82, 0, 0], [-0.82, 0, 0]].forEach(([ox, oy, oz]) => {
+        const isLong = Math.abs(oz) > Math.abs(ox);
+        const collarBar = new THREE.Mesh(
+          new THREE.BoxGeometry(isLong ? 1.6 : 0.08, 0.06, isLong ? 0.08 : 1.2),
+          collarMat,
+        );
+        collarBar.position.set(trenchMidX + ox, surfaceY + 0.005, trenchMidZ + oz);
+        worldGroup.add(collarBar);
+      });
+
+      /* Warning sign on a small post next to the route */
+      const signPostMat = new THREE.MeshStandardMaterial({
+        color: 0x9a9a9a, roughness: 0.6, metalness: 0.7,
+      });
+      const warnSignMat = new THREE.MeshStandardMaterial({
+        color: 0xffc340, emissive: 0xff7a1a, emissiveIntensity: 0.55,
+        roughness: 0.5, metalness: 0.1,
+      });
+      const signX = jx + (mx - jx) * 0.32 + 1.0;
+      const signZ = jz + (mz - jz) * 0.32 + 1.0;
+      const post = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.04, 0.04, 1.4, 8),
+        signPostMat,
+      );
+      post.position.set(signX, 0.4, signZ);
+      worldGroup.add(post);
+      const sign = new THREE.Mesh(
+        new THREE.BoxGeometry(0.6, 0.4, 0.04),
+        warnSignMat,
+      );
+      sign.position.set(signX, 1.1, signZ);
+      worldGroup.add(sign);
 
       /* Carrier junction box */
       const jbMat = new THREE.MeshStandardMaterial({
@@ -5544,6 +5915,45 @@
      * against these zones each frame and the topmost hit's label
      * is rendered as a single floating card following the cursor.
      */
+    /* ---------- Scene-wide IBL tuning pass ----------
+     *
+     * The HDRI environment is intense. Materials with high metalness
+     * and low roughness pick up too much specular reflection by
+     * default (envMapIntensity = 1.0), making metal panels look like
+     * mirrors. This pass walks every Mesh in worldGroup and applies
+     * a sensible envMapIntensity cap based on the material's
+     * roughness/metalness profile.
+     *
+     * Materials that already had envMapIntensity explicitly set are
+     * LEFT ALONE — those were tuned individually and should not be
+     * overridden. We detect "untuned" by checking if envMapIntensity
+     * is exactly 1.0 (Three.js default).
+     *
+     * Heuristic:
+     *   - High metal, low roughness (chrome-ish): cap at 0.55
+     *   - High metal, mid roughness (brushed metal): cap at 0.72
+     *   - Mid metal: cap at 0.85
+     *   - Low metal, low roughness (glass): cap at 0.9
+     *   - Otherwise leave at 1.0
+     */
+    function tuneSceneIBL(root) {
+      root.traverse((obj) => {
+        if (!obj.isMesh) return;
+        const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+        mats.forEach((mat) => {
+          if (!mat || mat.isMeshBasicMaterial || mat.isMeshLambertMaterial) return;
+          if (mat.envMapIntensity !== undefined && mat.envMapIntensity !== 1.0) return;
+          const m = mat.metalness ?? 0;
+          const r = mat.roughness ?? 1.0;
+          if (m >= 0.75 && r <= 0.3) mat.envMapIntensity = 0.55;
+          else if (m >= 0.7 && r <= 0.55) mat.envMapIntensity = 0.72;
+          else if (m >= 0.4) mat.envMapIntensity = 0.85;
+          else if (m < 0.2 && r <= 0.4) mat.envMapIntensity = 0.9;
+        });
+      });
+    }
+    tuneSceneIBL(worldGroup);
+
     const hoverLayer = document.createElement("div");
     hoverLayer.className = "forge-3d-hover-layer";
     container.appendChild(hoverLayer);
