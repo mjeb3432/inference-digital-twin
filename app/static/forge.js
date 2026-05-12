@@ -699,6 +699,20 @@
     bindEvents();
     hydrateLeftRailWidth();
 
+    /* DEMO MODE — URL parameter that seeds a beautiful pre-built
+     * polished state, bypassing the user's localStorage. The user
+     * can hit /forge?demo=repurpose-online and immediately see the
+     * floor view rendering at the reference quality (repurpose
+     * industrial site at Phase 8 "facility online") without
+     * clicking through 8 phases of decisions.
+     *
+     * Why this exists: the beforeunload handler writes in-memory
+     * state back to localStorage on every navigation, which made it
+     * impossible to inject a polished state from outside the app.
+     * This URL param is the supported way to load a "marketing-quality"
+     * scene snapshot. */
+    applyDemoStateFromURL();
+
     /* Resume the user's last build if there is one. The restore is
        lossy-safe: corrupted JSON or schema mismatches fall back to
        the default fresh facilityState. */
@@ -2517,6 +2531,121 @@
      * already entered the hall" flag so the WebGL2 datacenter scan
      * intro plays again — this is a fresh start, not a return visit. */
     try { window.localStorage.removeItem("forge:intro:seen:v1"); } catch (_) {}
+  }
+
+  /* ============================================================
+   * DEMO STATE PRESETS
+   * ============================================================
+   *
+   * Pre-built marketing-quality scenes that load with one URL param.
+   * Each preset is a fully-valid migrated payload — populates every
+   * field the floor view needs for a beautiful Phase 8 render.
+   *
+   * Usage: /forge?demo=repurpose-online
+   *
+   * After seeding, the URL is cleaned (history.replaceState) so the
+   * user doesn't accidentally re-seed on browser back/forward. */
+  const DEMO_PRESETS = {
+    "repurpose-online": {
+      label: "REPURPOSED INDUSTRIAL · FACILITY ONLINE",
+      build: () => {
+        const now = new Date().toISOString();
+        return {
+          schemaVersion: SCHEMA_VERSION,
+          scenario: {
+            id: cryptoRandomId(),
+            name: "REPURPOSE INDUSTRIAL DEMO",
+            createdAt: now,
+            updatedAt: now,
+            schemaVersion: SCHEMA_VERSION,
+          },
+          phase: 8,
+          completed: [1, 2, 3, 4, 5, 6, 7],
+          site: {
+            locationType: "repurpose",
+            cityKey: "dallas",
+            workloadProfile: "multimodal",
+            acreage: 35,
+            permittingTrack: Object.keys(PERMIT)[0] || null,
+            estimatedPermitCost: 0,
+            permittingMonths: 0,
+            utilityExpansionApproved: true,
+          },
+          power: {
+            sources: { fom: 60, gas: 20, solar: 10, wind: 5, smr: 5 },
+            targetMW: 10,
+            redundancyTier: Object.keys(REDUNDANCY)[2] || null,
+            upsType: Object.keys(UPS)[1] || null,
+          },
+          fiber: {
+            accessType: Object.keys(FIBER_ACCESS)[0] || null,
+            carriers: ["lumen", "zayo"].filter((k) => !!CARRIER[k]),
+            ixpRegion: Object.keys(IXP)[0] || null,
+            latencyMs: 7.3,
+            monthlyCost: 0,
+          },
+          facility: {
+            developerType: Object.keys(DEVELOPER)[0] || null,
+            buildMonths: 0,
+            coolingType: Object.keys(COOLING)[0] || null,
+            powerArchitecture: Object.keys(ARCH)[0] || null,
+            pue: 1.23,
+          },
+          compute: {
+            gpuModel: Object.keys(GPU)[1] || Object.keys(GPU)[0] || null,
+            gpusPerRack: 8,
+            rackCount: 0,
+            totalTFLOPS: 0,
+            inferenceStack: Object.keys(STACK)[0] || null,
+            servingArch: Object.keys(SERVING)[0] || null,
+          },
+          networking: {
+            intraNode: "nv",
+            fabric: Object.keys(FABRIC)[0] || null,
+            nodeCount: 4,
+            externalBandwidth: Object.keys(EXTERNAL)[0] || null,
+            networkingCapex: 0,
+          },
+          dcim: {
+            monitoringApproach: Object.keys(MONITORING)[0] || null,
+            maintenanceModel: Object.keys(MAINT)[0] || null,
+            coolingTelemetry: true,
+          },
+          benchmarkInput: {
+            model: "70B", prompt: 512, batch: 8, output: 256, conc: 16,
+            precision: "FP8", assumedObservedTps: 0, calibrationMode: false,
+          },
+          viewMode: VIEW_MODE.FLOOR,
+        };
+      },
+    },
+  };
+
+  function applyDemoStateFromURL() {
+    let params;
+    try { params = new URLSearchParams(window.location.search); }
+    catch (_) { return; }
+    const demoKey = params.get("demo");
+    if (!demoKey || !DEMO_PRESETS[demoKey]) return;
+    const preset = DEMO_PRESETS[demoKey];
+    try {
+      const payload = preset.build();
+      window.localStorage.setItem(FULL_STATE_KEY, JSON.stringify(payload));
+      /* Mark intro as seen so the WebGL2 scan animation is skipped —
+       * the demo URL is a "take me straight to the scene" request. */
+      window.localStorage.setItem("forge:intro:seen:v1", "true");
+    } catch (err) {
+      console.warn("[forge] demo preset seeding failed:", err);
+      return;
+    }
+    /* Strip the ?demo= param so back/forward doesn't re-seed and
+     * overwrite the user's edits if they tweak the demo scenario. */
+    try {
+      params.delete("demo");
+      const search = params.toString();
+      const newUrl = window.location.pathname + (search ? "?" + search : "") + window.location.hash;
+      window.history.replaceState({}, "", newUrl);
+    } catch (_) { /* not critical */ }
   }
 
   function enforceLocks() {

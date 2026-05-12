@@ -342,3 +342,33 @@ def test_gltf_loader_infrastructure_is_wired() -> None:
     assert "function loadAsset(assetKey)" in source
     assert "_assetCache" in source
     assert "GLTFLoader.js" in source
+
+
+def test_demo_url_param_seeds_polished_state() -> None:
+    """The ?demo=repurpose-online URL param seeds a marketing-quality
+    state so the floor view renders the polished repurpose phase 8
+    scene without the user having to click through 8 phases. Required
+    because the beforeunload handler writes in-memory state back to
+    localStorage on every navigation, making it impossible to inject
+    a polished state from outside the app via direct localStorage
+    manipulation."""
+    source = load_source()
+
+    # Demo presets registry exists
+    assert "const DEMO_PRESETS = {" in source
+    assert '"repurpose-online"' in source
+
+    # URL-param applier exists and is wired into init()
+    assert "function applyDemoStateFromURL()" in source
+    assert "applyDemoStateFromURL();" in source
+
+    # The repurpose preset uses the right location + phase
+    preset_body = between(source, '"repurpose-online":', "function applyDemoStateFromURL")
+    assert 'locationType: "repurpose"' in preset_body
+    assert "phase: 8" in preset_body
+    assert "completed: [1, 2, 3, 4, 5, 6, 7]" in preset_body
+
+    # The URL is stripped after seeding so back/forward doesn't re-seed
+    applier_body = between(source, "function applyDemoStateFromURL()", "function enforceLocks")
+    assert "history.replaceState" in applier_body
+    assert 'params.delete("demo")' in applier_body
